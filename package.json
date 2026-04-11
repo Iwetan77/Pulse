@@ -1,0 +1,37 @@
+{
+  "name": "stellar-pulse",
+  "version": "1.0.0",
+  "description": "Stellar Pulse — Autonomous On-Chain Financial Operating System with x402 micropayments",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "agent": "tsx src/agent/loop.ts",
+    "server": "tsx src/server/index.ts",
+    "demo": "tsx scripts/demo.ts",
+    "fund": "tsx scripts/fund-testnet.ts"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^13.1.0",
+    "@x402/core": "^2.9.0",
+    "@x402/express": "^2.9.0",
+    "@x402/fetch": "^2.9.0",
+    "@x402/stellar": "^2.9.0",
+    "chalk": "^5.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3",
+    "tsx": "^4.15.7",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.5.3"
+  }
+}

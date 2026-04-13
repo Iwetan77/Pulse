@@ -1,269 +1,242 @@
 // ─────────────────────────────────────────────────
-//  Stellar Pulse — Wallet & Soroban SAC Utility
+//  Stellar Pulse — Wallet Utility
 //
-//  Uses the Stellar Asset Contract (SAC) — the pre-deployed
-//  Soroban contract for every Stellar token — to interact with
-//  USDC without writing custom smart contracts.
+//  Real Stellar testnet transactions:
+//  1. XLM payments via Operation.payment (Horizon)
+//  2. XLM → USDC swap via SDEX pathPayment (on-chain DEX)
+//     Both are traceable on stellar.expert/explorer/testnet
 //
-//  Soroban integration:
-//    - Calls SAC `balance()` to read USDC holdings via Soroban RPC
-//    - Builds Soroban invokeContract ops for USDC transfers
-//    - Simulates transfers before execution (safe-by-default)
+//  Friendbot auto-funds on startup + on low balance.
 // ─────────────────────────────────────────────────
 
 import {
-  Keypair,
-  Contract,
-  Address,
-  TransactionBuilder,
-  Memo,
-  Networks,
-  nativeToScVal,
-  scValToNative,
-  Horizon,
-  rpc as SorobanRpc,
+  Keypair, TransactionBuilder, Operation,
+  Asset, Memo, Networks, Horizon, StrKey,
 } from "@stellar/stellar-sdk";
-import { config, getUSDCContractId, getUSDCAsset } from "./config.js";
+import { config } from "./config.js";
 import { logger } from "./logger.js";
-import type { WalletSnapshot, SACTransferDetails } from "../types/index.js";
+import type { WalletSnapshot } from "../types/index.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// ── Soroban RPC Client ────────────────────────────
-function getSorobanRpc() {
-  return new SorobanRpc.Server(config.rpcUrl, {
-    allowHttp: config.rpcUrl.startsWith("http://"),
-  });
+const __dirname  = path.dirname(fileURLToPath(import.meta.url));
+const HORIZON    = "https://horizon-testnet.stellar.org";
+const FRIENDBOT  = "https://friendbot.stellar.org";
+const EXPLORER   = "https://stellar.expert/explorer/testnet/tx";
+const NET_PASS   = Networks.TESTNET;
+
+// Testnet USDC issued by Circle's testnet issuer
+const USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+const USDC_ASSET  = new Asset("USDC", USDC_ISSUER);
+
+export { EXPLORER };
+
+function horizon() { return new Horizon.Server(HORIZON); }
+
+// ── Auto-generate + fund wallet on first boot ─────
+export async function ensureTestnetWallet(): Promise<Keypair> {
+  if (config.secretKey && config.secretKey.startsWith("S") && config.secretKey.length === 56) {
+    const kp = Keypair.fromSecret(config.secretKey);
+    // Update publicKey in config if missing
+    if (!config.publicKey) (config as any).publicKey = kp.publicKey();
+    return kp;
+  }
+
+  const keypair = Keypair.random();
+  logger.info(`New keypair: ${keypair.publicKey()}`);
+
+  // Fund via Friendbot
+  logger.info("Calling Friendbot for 10,000 XLM…");
+  const res = await fetch(`${FRIENDBOT}?addr=${keypair.publicKey()}`);
+  if (!res.ok) {
+    const txt = await res.text();
+    if (!txt.includes("already")) throw new Error(`Friendbot failed: ${txt.slice(0,100)}`);
+  }
+  logger.success(`Wallet funded: https://stellar.expert/explorer/testnet/account/${keypair.publicKey()}`);
+
+  // Write to .env
+  const envPath = path.resolve(__dirname, "../../.env");
+  try {
+    let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+    const lines = content.split("\n").filter(l => !l.startsWith("PULSE_SECRET_KEY") && !l.startsWith("PULSE_PUBLIC_KEY"));
+    lines.push(`PULSE_SECRET_KEY=${keypair.secret()}`);
+    lines.push(`PULSE_PUBLIC_KEY=${keypair.publicKey()}`);
+    fs.writeFileSync(envPath, lines.join("\n") + "\n");
+    logger.info(".env updated with new keypair");
+  } catch { logger.warn("Could not write .env"); }
+
+  (config as any).secretKey = keypair.secret();
+  (config as any).publicKey = keypair.publicKey();
+
+  await sleep(4000); // wait for account to be created
+  return keypair;
 }
 
-// ── Horizon Server ────────────────────────────────
-function getHorizon() {
-  return new Horizon.Server(config.horizonUrl);
-}
-
-// ── Keypair from config ───────────────────────────
 export function getKeypair(): Keypair {
-  if (!config.secretKey) {
-    throw new Error(
-      "PULSE_SECRET_KEY not set. Run `npm run fund` to create a testnet wallet."
-    );
+  if (!config.secretKey || !config.secretKey.startsWith("S")) {
+    throw new Error("No keypair — agent not yet bootstrapped.");
   }
   return Keypair.fromSecret(config.secretKey);
 }
 
-// ── Read XLM + USDC balances ──────────────────────
+// ── Wallet snapshot ───────────────────────────────
 export async function getWalletSnapshot(): Promise<WalletSnapshot> {
-  const horizon = getHorizon();
-  const publicKey = config.publicKey || (config.secretKey ? getKeypair().publicKey() : "GDEMO");
-
-  let xlmBalance = "0";
-  let usdcBalance = "0";
-  let sequence = "0";
-
-  try {
-    const account = await horizon.loadAccount(publicKey);
-    sequence = account.sequenceNumber();
-
-    for (const balance of account.balances) {
-      if (balance.asset_type === "native") {
-        xlmBalance = balance.balance;
-      } else if (
-        balance.asset_type === "credit_alphanum4" &&
-        balance.asset_code === "USDC" &&
-        balance.asset_issuer === getUSDCAsset().issuer
-      ) {
-        usdcBalance = balance.balance;
-      }
-    }
-
-    // Also attempt Soroban SAC balance read for USDC
-    try {
-      const sacBalance = await readSACBalance(publicKey);
-      if (sacBalance !== null) {
-        usdcBalance = sacBalance;
-        logger.soroban(`SAC balance read: ${sacBalance} USDC`);
-      }
-    } catch {
-      logger.warn("SAC balance read failed, using Horizon balance");
-    }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("Not Found") || msg.includes("404")) {
-      logger.warn(`Account not found on ${config.network}. Fund it first.`);
-    } else if (!config.demoMode) {
-      throw err;
-    }
+  const publicKey = config.publicKey || (config.secretKey ? getKeypair().publicKey() : "");
+  if (!publicKey || publicKey === "NOT_CONFIGURED") {
+    return { publicKey: "NOT_CONFIGURED", xlmBalance: "0", usdcBalance: "0", usdcContractId: "", sequence: "0", lastUpdated: new Date() };
   }
 
-  return {
-    publicKey,
-    xlmBalance,
-    usdcBalance,
-    usdcContractId: getUSDCContractId(),
-    sequence,
-    lastUpdated: new Date(),
-  };
-}
-
-// ── Read USDC balance via Soroban SAC contract ────
-// This is the Soroban-native way: call balance(address) on the SAC
-export async function readSACBalance(address: string): Promise<string | null> {
-  const rpcClient = getSorobanRpc();
-  const contractId = getUSDCContractId();
-
+  let xlmBalance = "0", usdcBalance = "0", sequence = "0";
   try {
-    const contract = new Contract(contractId);
-    const addressSCV = Address.fromString(address).toScVal();
-
-    const keypair = config.secretKey ? getKeypair() : Keypair.random();
-    const account = await rpcClient.getAccount(keypair.publicKey());
-    const tx = new TransactionBuilder(account, {
-      fee: "1000",
-      networkPassphrase: config.networkPassphrase,
-    })
-      .addOperation(contract.call("balance", addressSCV))
-      .setTimeout(30)
-      .build();
-
-    const result = await rpcClient.simulateTransaction(tx);
-
-    if (SorobanRpc.Api.isSimulationSuccess(result)) {
-      const returnVal = result.result?.retval;
-      if (returnVal) {
-        // SAC balance is i128 in stroops (7 decimal places for USDC on Stellar)
-        const raw = scValToNative(returnVal) as bigint;
-        const usdc = (Number(raw) / 1e7).toFixed(7);
-        return usdc;
+    const acct = await horizon().loadAccount(publicKey);
+    sequence = acct.sequenceNumber();
+    for (const b of acct.balances) {
+      if (b.asset_type === "native") xlmBalance = b.balance;
+      if (b.asset_type === "credit_alphanum4" && b.asset_code === "USDC" && b.asset_issuer === USDC_ISSUER) {
+        usdcBalance = b.balance;
       }
     }
-  } catch (err) {
-    logger.soroban(
-      "SAC balance simulation error",
-      err instanceof Error ? err.message : err
-    );
-  }
-
-  return null;
-}
-
-// ── Simulate a USDC transfer via Soroban SAC ─────
-// Builds and SIMULATES a transfer — never submits.
-// This is the safe-by-default pattern for demo/hackathon use.
-export async function simulateSACTransfer(
-  fromAddress: string,
-  toAddress: string,
-  amountUSDC: string
-): Promise<SACTransferDetails> {
-  const rpcClient = getSorobanRpc();
-  const contractId = getUSDCContractId();
-
-  const details: SACTransferDetails = {
-    contractId,
-    fromAddress,
-    toAddress,
-    amount: amountUSDC,
-    simulationSuccess: false,
-  };
-
-  try {
-    const contract = new Contract(contractId);
-    // USDC has 7 decimal places on Stellar
-    const amountStroops = BigInt(Math.round(parseFloat(amountUSDC) * 1e7));
-
-    const fromSCV = Address.fromString(fromAddress).toScVal();
-    const toSCV   = Address.fromString(toAddress).toScVal();
-    const amtSCV  = nativeToScVal(amountStroops, { type: "i128" });
-
-    const keypair = config.secretKey ? getKeypair() : Keypair.random();
-    const account = await rpcClient.getAccount(keypair.publicKey());
-
-    const tx = new TransactionBuilder(account, {
-      fee: "1000",
-      networkPassphrase: config.networkPassphrase,
-    })
-      .addOperation(contract.call("transfer", fromSCV, toSCV, amtSCV))
-      .setTimeout(30)
-      .build();
-
-    const simResult = await rpcClient.simulateTransaction(tx);
-
-    if (SorobanRpc.Api.isSimulationSuccess(simResult)) {
-      details.simulationSuccess = true;
-      details.simulationResult = "Transfer simulation successful — ready to execute";
-      logger.soroban(
-        `SAC transfer simulation: ${amountUSDC} USDC → ${toAddress.slice(0, 8)}…`,
-        { success: true, minResourceFee: simResult.minResourceFee }
-      );
-    } else if (SorobanRpc.Api.isSimulationError(simResult)) {
-      details.simulationResult = `Simulation error: ${simResult.error}`;
-      logger.warn("SAC simulation failed", simResult.error);
+  } catch (e: any) {
+    if (e.message?.includes("404") || e.message?.includes("Not Found")) {
+      logger.warn("Account not found — refilling via Friendbot");
+      await refillViaFriendbot(publicKey);
     }
-  } catch (err) {
-    details.simulationResult = `Exception: ${err instanceof Error ? err.message : String(err)}`;
-    logger.error("SAC simulation exception", details.simulationResult);
   }
-
-  return details;
+  return { publicKey, xlmBalance, usdcBalance, usdcContractId: "", sequence, lastUpdated: new Date() };
 }
 
-// ── Execute a real USDC transfer via Soroban SAC ─
-// Only called when NOT in demo mode with real testnet funds
-export async function executeSACTransfer(
-  toAddress: string,
-  amountUSDC: string,
-  memo?: string
-): Promise<string> {
-  const rpcClient = getSorobanRpc();
+// ── Friendbot refill ──────────────────────────────
+export async function refillViaFriendbot(addr?: string): Promise<boolean> {
+  const address = addr || config.publicKey || (config.secretKey ? getKeypair().publicKey() : "");
+  if (!address) return false;
+  try {
+    logger.info(`Friendbot → ${address.slice(0, 12)}…`);
+    const res = await fetch(`${FRIENDBOT}?addr=${address}`);
+    const txt = await res.text();
+    if (res.ok || txt.includes("already")) {
+      logger.success("Friendbot: wallet funded / confirmed funded");
+      return true;
+    }
+    logger.warn(`Friendbot ${res.status}: ${txt.slice(0, 80)}`);
+    return false;
+  } catch (e: any) {
+    logger.error("Friendbot failed", e.message);
+    return false;
+  }
+}
+
+// ── Add USDC trustline ────────────────────────────
+export async function ensureUSDCTrustline(): Promise<string | null> {
   const keypair = getKeypair();
-  const contractId = getUSDCContractId();
-  const contract = new Contract(contractId);
-
-  const amountStroops = BigInt(Math.round(parseFloat(amountUSDC) * 1e7));
-  const fromSCV = Address.fromString(keypair.publicKey()).toScVal();
-  const toSCV   = Address.fromString(toAddress).toScVal();
-  const amtSCV  = nativeToScVal(amountStroops, { type: "i128" });
-
-  const account = await rpcClient.getAccount(keypair.publicKey());
-
-  let txBuilder = new TransactionBuilder(account, {
-    fee: "1000",
-    networkPassphrase: config.networkPassphrase,
-  }).addOperation(contract.call("transfer", fromSCV, toSCV, amtSCV));
-
-  if (memo) {
-    txBuilder = txBuilder.addMemo(Memo.text(memo.slice(0, 28)));
-  }
-
-  const tx = txBuilder.setTimeout(30).build();
-  const simResult = await rpcClient.simulateTransaction(tx);
-
-  if (!SorobanRpc.Api.isSimulationSuccess(simResult)) {
-    throw new Error("Simulation failed before execution");
-  }
-
-  const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
-  preparedTx.sign(keypair);
-
-  const sendResult = await rpcClient.sendTransaction(preparedTx);
-
-  if (sendResult.status === "ERROR") {
-    throw new Error(`Transaction send failed: ${JSON.stringify(sendResult.errorResult)}`);
-  }
-
-  // Poll for confirmation
-  let confirmation;
-  let attempts = 0;
-  while (attempts < 20) {
-    await new Promise((r) => setTimeout(r, 1500));
-    confirmation = await rpcClient.getTransaction(sendResult.hash);
-    if (confirmation.status !== SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
-      break;
+  const h = horizon();
+  try {
+    const acct = await h.loadAccount(keypair.publicKey());
+    // Check if trustline already exists
+    for (const b of acct.balances) {
+      if (b.asset_type === "credit_alphanum4" && b.asset_code === "USDC") {
+        logger.info("USDC trustline already exists");
+        return null;
+      }
     }
-    attempts++;
-  }
-
-  if (confirmation?.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-    logger.soroban(`SAC transfer confirmed`, { hash: sendResult.hash });
-    return sendResult.hash;
-  } else {
-    throw new Error(`Transaction failed: ${JSON.stringify(confirmation)}`);
+    // Add trustline
+    logger.info("Adding USDC trustline…");
+    const tx = new TransactionBuilder(acct, { fee: "1000", networkPassphrase: NET_PASS })
+      .addOperation(Operation.changeTrust({ asset: USDC_ASSET, limit: "100000" }))
+      .setTimeout(30)
+      .build();
+    tx.sign(keypair);
+    const result = await h.submitTransaction(tx);
+    const hash = (result as any).hash;
+    logger.success(`USDC trustline TX: ${EXPLORER}/${hash}`);
+    return hash;
+  } catch (e: any) {
+    logger.error("Trustline failed", e.message);
+    return null;
   }
 }
+
+// ── XLM → USDC swap via Stellar SDEX ─────────────
+// Uses pathPaymentStrictReceive to swap XLM for USDC
+// This is a real on-chain DEX transaction, traceable on stellar.expert
+export async function swapXLMForUSDC(
+  xlmToSpend: string,
+  minUSDCOut: string
+): Promise<{ hash: string; explorerUrl: string; usdcReceived: string }> {
+  const keypair = getKeypair();
+  const h = horizon();
+
+  // Ensure trustline first
+  await ensureUSDCTrustline();
+  await sleep(2000);
+
+  const acct = await h.loadAccount(keypair.publicKey());
+
+  logger.info(`SDEX Swap: up to ${xlmToSpend} XLM → USDC (min ${minUSDCOut} USDC)`);
+
+  const tx = new TransactionBuilder(acct, { fee: "10000", networkPassphrase: NET_PASS })
+    .addOperation(
+      Operation.pathPaymentStrictReceive({
+        sendAsset:   Asset.native(),          // spending XLM
+        sendMax:     xlmToSpend,              // max XLM to spend
+        destination: keypair.publicKey(),     // receiving to same wallet
+        destAsset:   USDC_ASSET,              // getting USDC
+        destAmount:  minUSDCOut,              // minimum USDC to receive
+        path: [],                             // Stellar finds best path
+      })
+    )
+    .addMemo(Memo.text("PULSE:XLM-USDC-SWAP"))
+    .setTimeout(30)
+    .build();
+
+  tx.sign(keypair);
+
+  const result = await h.submitTransaction(tx);
+  const hash = (result as any).hash;
+  const url  = `${EXPLORER}/${hash}`;
+
+  // Read new USDC balance
+  await sleep(3000);
+  const snap = await getWalletSnapshot();
+
+  logger.success(`SDEX Swap confirmed: ${hash}`);
+  logger.info(`Explorer: ${url}`);
+  logger.info(`New USDC balance: ${snap.usdcBalance}`);
+
+  return { hash, explorerUrl: url, usdcReceived: snap.usdcBalance };
+}
+
+// ── Submit real XLM payment ───────────────────────
+export async function submitXLMPayment(
+  toAddress: string,
+  amountXLM: string,
+  memoText?: string
+): Promise<{ hash: string; explorerUrl: string }> {
+  if (!StrKey.isValidEd25519PublicKey(toAddress)) {
+    throw new Error(`Invalid destination: ${toAddress}`);
+  }
+
+  const keypair = getKeypair();
+  const h = horizon();
+  const acct = await h.loadAccount(keypair.publicKey());
+
+  let builder = new TransactionBuilder(acct, { fee: "1000", networkPassphrase: NET_PASS })
+    .addOperation(Operation.payment({ destination: toAddress, asset: Asset.native(), amount: amountXLM }));
+
+  if (memoText) builder = builder.addMemo(Memo.text(memoText.slice(0, 28)));
+
+  const tx = builder.setTimeout(30).build();
+  tx.sign(keypair);
+
+  const result = await h.submitTransaction(tx);
+  const hash = (result as any).hash;
+  const explorerUrl = `${EXPLORER}/${hash}`;
+
+  logger.success(`Real TX: ${explorerUrl}`);
+  return { hash, explorerUrl };
+}
+
+// Alias used by executor
+export const executeTestnetPayment = submitXLMPayment;
+
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }

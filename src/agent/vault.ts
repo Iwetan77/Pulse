@@ -1,192 +1,159 @@
 // ─────────────────────────────────────────────────
 //  Stellar Pulse — Priority Vault
 //
-//  The vault is the core of Pulse. Every obligation
-//  is ranked by priority. The agent respects this
-//  order when wallet funds are limited.
-//
-//  Priority order: CRITICAL > HIGH > MEDIUM > LOW > DISCRETIONARY
+//  Entries use small XLM amounts so real testnet
+//  payments don't drain the wallet quickly.
+//  SAC_TRANSFER = real XLM tx on testnet
+//  X402         = x402 micropayment flow
 // ─────────────────────────────────────────────────
 
 import { v4 as uuidv4 } from "uuid";
 import type { VaultEntry, PaymentPriority, PaymentStatus } from "../types/index.js";
 import { logger } from "../utils/logger.js";
 
-const PRIORITY_ORDER: PaymentPriority[] = [
-  "CRITICAL",
-  "HIGH",
-  "MEDIUM",
-  "LOW",
-  "DISCRETIONARY",
-];
-
-// ── In-memory vault store ─────────────────────────
+const PRIORITY_ORDER: PaymentPriority[] = ["CRITICAL","HIGH","MEDIUM","LOW","DISCRETIONARY"];
 const vault: Map<string, VaultEntry> = new Map();
+let seeded = false;
 
-// ── Seed with demo obligations ────────────────────
 export function seedDemoVault(agentPublicKey: string): void {
-  const demoEntries: Omit<VaultEntry, "id" | "createdAt">[] = [
+  if (seeded) return;
+  seeded = true;
+
+  // Small XLM amounts — real payments, but wallet stays funded
+  // 1 XLM ≈ $0.09 — small enough for demo, real enough to prove testnet
+  const entries: Omit<VaultEntry,"id"|"createdAt">[] = [
     {
-      label: "Monthly Rent",
-      description: "Automated rent payment to landlord wallet",
+      label: "Rent — PULSE Demo",
+      description: "Real XLM payment on Stellar testnet (simulating USDC rent)",
       priority: "CRITICAL",
-      recipientAddress: "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ",
-      amountUSDC: "500.00",
+      // Public testnet address (Stellar's own testnet account)
+      recipientAddress: "GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR",
+      amountUSDC: "1",   // 1 XLM — real testnet payment
       method: "SAC_TRANSFER",
-      recurringCron: "0 9 1 * *",  // 9am on 1st of month
-      memo: "RENT-2026",
+      memo: "PULSE:RENT",
       status: "PENDING",
-      tags: ["housing", "critical", "recurring"],
+      tags: ["housing","critical","real-tx"],
     },
     {
-      label: "Staff Payroll — Engineering",
-      description: "Monthly salary for engineering team",
+      label: "Payroll — PULSE Demo",
+      description: "Real XLM payment on Stellar testnet (simulating salary)",
       priority: "CRITICAL",
       recipientAddress: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q",
-      amountUSDC: "2000.00",
+      amountUSDC: "1",
       method: "SAC_TRANSFER",
-      recurringCron: "0 10 28 * *", // 10am on 28th of month
-      memo: "PAYROLL-ENG-APR26",
+      memo: "PULSE:PAYROLL",
       status: "PENDING",
-      tags: ["payroll", "critical", "recurring"],
+      tags: ["payroll","critical","real-tx"],
     },
     {
-      label: "Stellar Horizon API",
-      description: "Pay-per-query Horizon data feed via x402",
+      label: "Analytics API (x402)",
+      description: "x402 HTTP micropayment — Soroban auth entry flow",
+      priority: "HIGH",
+      recipientAddress: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q",
+      amountUSDC: "0.005",
+      method: "X402",
+      x402Endpoint: "http://localhost:4022/api/analytics",
+      memo: "x402:analytics",
+      status: "PENDING",
+      tags: ["saas","x402"],
+    },
+    {
+      label: "Market Data (x402)",
+      description: "x402 pay-per-request market data feed",
       priority: "MEDIUM",
-      recipientAddress: "GAHK7EEG2WWHVKDNT4CEQFZGKF2LGDSW2IVM4S5DP42RBW3K6BTODB4",
+      recipientAddress: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q",
       amountUSDC: "0.001",
       method: "X402",
       x402Endpoint: "http://localhost:4022/api/market-data",
-      memo: "x402:horizon-data",
+      memo: "x402:market-data",
       status: "PENDING",
-      tags: ["api", "data", "x402", "per-use"],
+      tags: ["data","x402"],
     },
     {
-      label: "AI Research Agent",
-      description: "Agent-to-agent payment for research task execution",
+      label: "AI Research Agent (x402)",
+      description: "Agent-to-agent task payment via x402",
       priority: "LOW",
       recipientAddress: "GCFONE23AB7Y6C5XTEWARNJ3I3VWMS7IGHIVCAHOI3KKNCD44DTIWJXQ",
       amountUSDC: "0.005",
       method: "X402",
       x402Endpoint: "http://localhost:4022/api/research",
-      memo: "x402:agent-research",
+      memo: "x402:research",
       status: "PENDING",
-      tags: ["agent", "automation", "x402", "per-use"],
+      tags: ["agent","x402"],
     },
     {
-      label: "Weather Data Feed",
-      description: "Per-request weather data for autonomous agent decisions",
+      label: "Weather Feed (x402)",
+      description: "Discretionary weather data per request",
       priority: "DISCRETIONARY",
-      recipientAddress: "GAHK7EEG2WWHVKDNT4CEQFZGKF2LGDSW2IVM4S5DP42RBW3K6BTODB4",
+      recipientAddress: "GCFONE23AB7Y6C5XTEWARNJ3I3VWMS7IGHIVCAHOI3KKNCD44DTIWJXQ",
       amountUSDC: "0.001",
       method: "X402",
       x402Endpoint: "http://localhost:4022/api/weather",
       memo: "x402:weather",
       status: "PENDING",
-      tags: ["data", "x402", "per-use", "discretionary"],
-    },
-    {
-      label: "Business Analytics SaaS",
-      description: "Monthly analytics platform subscription (pay-per-session)",
-      priority: "HIGH",
-      recipientAddress: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q",
-      amountUSDC: "25.00",
-      method: "X402",
-      x402Endpoint: "http://localhost:4022/api/analytics",
-      recurringCron: "0 8 1 * *",
-      memo: "x402:analytics-subs",
-      status: "PENDING",
-      tags: ["saas", "analytics", "x402"],
+      tags: ["data","x402","discretionary"],
     },
   ];
 
-  for (const entry of demoEntries) {
-    const id = uuidv4();
-    vault.set(id, { ...entry, id, createdAt: new Date() });
+  for (const e of entries) {
+    vault.set(uuidv4(), { ...e, id: uuidv4(), createdAt: new Date() });
   }
-
-  logger.info(`Priority Vault seeded with ${vault.size} entries`);
+  logger.info(`Vault seeded: ${vault.size} entries (2 real XLM txs + ${vault.size-2} x402)`);
 }
 
-// ── CRUD ──────────────────────────────────────────
+export function resetX402ForNextCycle(): void {
+  for (const [id, e] of vault.entries()) {
+    if (e.method === "X402" && e.status === "SETTLED") {
+      vault.set(id, { ...e, status: "PENDING" });
+    }
+  }
+}
 
-export function addVaultEntry(
-  entry: Omit<VaultEntry, "id" | "createdAt">
-): VaultEntry {
+export function getActionableEntries(): VaultEntry[] {
+  return [...vault.values()]
+    .filter(e => e.status === "PENDING")
+    .sort((a,b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority));
+}
+
+export function addVaultEntry(e: Omit<VaultEntry,"id"|"createdAt">): VaultEntry {
   const id = uuidv4();
-  const full: VaultEntry = { ...entry, id, createdAt: new Date() };
+  const full = { ...e, id, createdAt: new Date() };
   vault.set(id, full);
-  logger.info(`Vault entry added: [${entry.priority}] ${entry.label}`);
+  logger.info(`Vault: added [${e.priority}] ${e.label}`);
   return full;
 }
 
-export function getVaultEntry(id: string): VaultEntry | undefined {
-  return vault.get(id);
+export function getVaultEntry(id: string)      { return vault.get(id); }
+export function getAllVaultEntries()            { return [...vault.values()]; }
+export function updateEntryStatus(id: string, status: PaymentStatus) {
+  const e = vault.get(id);
+  if (e) vault.set(id, { ...e, status, lastExecutedAt: new Date() });
 }
-
-export function getAllVaultEntries(): VaultEntry[] {
-  return [...vault.values()];
-}
-
-export function getEntriesByPriority(priority: PaymentPriority): VaultEntry[] {
-  return [...vault.values()].filter((e) => e.priority === priority);
-}
-
-export function getSortedVaultEntries(): VaultEntry[] {
-  return [...vault.values()].sort(
-    (a, b) =>
-      PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority)
-  );
-}
-
-export function getX402Entries(): VaultEntry[] {
-  return [...vault.values()].filter((e) => e.method === "X402");
-}
-
-export function updateEntryStatus(id: string, status: PaymentStatus): void {
-  const entry = vault.get(id);
-  if (entry) {
-    vault.set(id, { ...entry, status, lastExecutedAt: new Date() });
-    logger.info(`Vault [${id.slice(0, 8)}] status → ${status}`);
-  }
-}
-
-export function killEntry(id: string): void {
-  updateEntryStatus(id, "KILLED");
-  logger.warn(`Kill switch activated for vault entry ${id.slice(0, 8)}`);
-}
-
+export function deleteEntry(id: string)        { return vault.delete(id); }
+export function killEntry(id: string)          { updateEntryStatus(id, "KILLED"); }
 export function killAllDiscretionary(): number {
-  let count = 0;
-  for (const [id, entry] of vault.entries()) {
-    if (entry.priority === "DISCRETIONARY" && entry.status === "PENDING") {
-      vault.set(id, { ...entry, status: "KILLED" });
-      count++;
+  let n = 0;
+  for (const [id, e] of vault.entries()) {
+    if (e.priority === "DISCRETIONARY" && e.status === "PENDING") {
+      vault.set(id, { ...e, status: "KILLED" });
+      n++;
     }
   }
-  logger.warn(`Kill switch: halted ${count} DISCRETIONARY entries`);
-  return count;
+  return n;
 }
 
 export function getVaultSummary() {
-  const entries = [...vault.values()];
-  const totalScheduled = entries
-    .filter((e) => e.status === "PENDING")
-    .reduce((sum, e) => sum + parseFloat(e.amountUSDC), 0);
-
+  const all = [...vault.values()];
+  const pending = all.filter(e=>e.status==="PENDING");
   return {
-    total: entries.length,
-    pending: entries.filter((e) => e.status === "PENDING").length,
-    settled: entries.filter((e) => e.status === "SETTLED").length,
-    killed: entries.filter((e) => e.status === "KILLED").length,
-    x402Services: entries.filter((e) => e.method === "X402").length,
-    totalScheduledUSDC: totalScheduled.toFixed(7),
-    byPriority: Object.fromEntries(
-      PRIORITY_ORDER.map((p) => [
-        p,
-        entries.filter((e) => e.priority === p).length,
-      ])
-    ),
+    total:              all.length,
+    pending:            pending.length,
+    settled:            all.filter(e=>e.status==="SETTLED").length,
+    killed:             all.filter(e=>e.status==="KILLED").length,
+    failed:             all.filter(e=>e.status==="FAILED").length,
+    x402Services:       all.filter(e=>e.method==="X402").length,
+    realTxEntries:      all.filter(e=>e.method==="SAC_TRANSFER").length,
+    totalScheduledUSDC: pending.reduce((s,e)=>s+parseFloat(e.amountUSDC),0).toFixed(7),
+    byPriority: Object.fromEntries(["CRITICAL","HIGH","MEDIUM","LOW","DISCRETIONARY"].map(p=>[p,all.filter(e=>e.priority===p).length])),
   };
 }

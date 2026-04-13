@@ -1,172 +1,205 @@
 // ─────────────────────────────────────────────────
 //  Stellar Pulse — Autonomous Agent Loop
 //
-//  The core agent. Runs continuously:
-//    Perceive → Evaluate → Decide → Execute → Log
+//  Startup: 35-second countdown printed to terminal
+//  so you can open http://localhost:4021 before
+//  cycle 1 fires.
 //
-//  Architecture:
-//    1. Read wallet state (Horizon + Soroban SAC)
-//    2. Evaluate priority vault against available funds
-//    3. Produce ordered decisions
-//    4. Execute: SAC transfers (Soroban) or x402 payments
-//    5. Record every action to the ledger
+//  Auto-swap: if XLM > 50 and USDC < 10, the agent
+//  autonomously swaps XLM → USDC via Stellar SDEX.
+//  This is a real on-chain DEX tx, traceable on explorer.
 // ─────────────────────────────────────────────────
 
 import { config } from "../utils/config.js";
 import { logger } from "../utils/logger.js";
-import { getWalletSnapshot } from "../utils/wallet.js";
 import {
-  getSortedVaultEntries,
-  seedDemoVault,
-  getVaultSummary,
-  killAllDiscretionary,
-  getAllVaultEntries,
+  getWalletSnapshot, ensureTestnetWallet,
+  refillViaFriendbot, swapXLMForUSDC,
+} from "../utils/wallet.js";
+import {
+  getActionableEntries, getAllVaultEntries, seedDemoVault,
+  getVaultSummary, killAllDiscretionary, resetX402ForNextCycle,
 } from "./vault.js";
 import { evaluatePolicy, logPolicyEvaluation } from "./policy.js";
 import { executeDecision } from "./executor.js";
-import { printLedger, recordSnapshot, getRecentEvents, getTotalSpent, getX402Summary } from "./ledger.js";
+import {
+  printLedger, recordSnapshot, getRecentEvents,
+  getTotalSpent, getX402Summary, recordSwapEvent,
+} from "./ledger.js";
 import type { AgentLoopState, PulseSnapshot } from "../types/index.js";
 
-// ── Global agent state ────────────────────────────
 export const agentState: AgentLoopState = {
-  iteration: 0,
-  isRunning: false,
-  lastSnapshot: null,
-  killSwitchActive: false,
-  pausedCategories: [],
+  iteration: 0, isRunning: false,
+  lastSnapshot: null, killSwitchActive: false, pausedCategories: [],
 };
 
 // ── Bootstrap ─────────────────────────────────────
 async function bootstrap(): Promise<void> {
   logger.divider("STELLAR PULSE — AUTONOMOUS FINANCIAL OS");
-  logger.info("Initializing agent…");
-  logger.info(`Network:     ${config.network}`);
-  logger.info(`Demo Mode:   ${config.demoMode}`);
-  logger.info(`Horizon:     ${config.horizonUrl}`);
-  logger.info(`Soroban RPC: ${config.rpcUrl}`);
-  logger.info(`x402 Facil.: ${config.facilitatorUrl}`);
+  logger.info("Network:  Stellar Testnet (real transactions)");
+  logger.info("Explorer: https://stellar.expert/explorer/testnet");
+  logger.info(`Loop:     Every ${config.agentLoopIntervalSeconds}s`);
+  logger.info(`x402:     ${config.demoMode ? "DEMO mode" : "LIVE mode"}`);
 
-  // Seed demo vault
+  // Auto-generate + fund wallet
+  const keypair = await ensureTestnetWallet();
+  logger.success(`Wallet:   ${keypair.publicKey()}`);
+  logger.info(`View:     https://stellar.expert/explorer/testnet/account/${keypair.publicKey()}`);
+
   const wallet = await getWalletSnapshot();
-  logger.info(`Wallet: ${wallet.publicKey.slice(0, 12)}…  XLM: ${wallet.xlmBalance}  USDC: ${wallet.usdcBalance}`);
+  logger.info(`XLM:      ${parseFloat(wallet.xlmBalance).toFixed(2)}`);
+  logger.info(`USDC:     ${parseFloat(wallet.usdcBalance).toFixed(4)}`);
 
-  seedDemoVault(wallet.publicKey);
+  // Auto-refill if XLM is low
+  if (parseFloat(wallet.xlmBalance) < 20) {
+    logger.warn("XLM < 20 — requesting Friendbot refill…");
+    await refillViaFriendbot(keypair.publicKey());
+    await sleep(4000);
+  }
 
-  const summary = getVaultSummary();
-  logger.snapshot("Priority Vault Summary", {
-    "Total entries":    summary.total,
-    "Pending":          summary.pending,
-    "x402 services":    summary.x402Services,
-    "Total scheduled":  `${summary.totalScheduledUSDC} USDC`,
-    "CRITICAL entries": summary.byPriority.CRITICAL,
-    "HIGH entries":     summary.byPriority.HIGH,
-    "MEDIUM entries":   summary.byPriority.MEDIUM,
-    "LOW entries":      summary.byPriority.LOW,
-    "DISCRETIONARY":    summary.byPriority.DISCRETIONARY,
+  // Auto-swap XLM → USDC if USDC balance is near zero
+  // (gives the agent real USDC to show in the dashboard)
+  const refreshed = await getWalletSnapshot();
+  if (parseFloat(refreshed.xlmBalance) > 50 && parseFloat(refreshed.usdcBalance) < 5) {
+    logger.info("USDC < 5 — auto-swapping 20 XLM → USDC via Stellar SDEX…");
+    try {
+      const swap = await swapXLMForUSDC("20", "0.01");
+      recordSwapEvent(swap.hash, swap.explorerUrl, "20", swap.usdcReceived);
+      logger.success(`Swap confirmed: ${swap.usdcReceived} USDC received`);
+    } catch (e: any) {
+      logger.warn(`SDEX swap failed (no liquidity on testnet) — continuing with XLM: ${e.message}`);
+    }
+  }
+
+  seedDemoVault(keypair.publicKey());
+
+  const s = getVaultSummary();
+  logger.snapshot("Priority Vault", {
+    "Entries":       s.total,
+    "Pending":       s.pending,
+    "Real XLM txs":  s.realTxEntries,
+    "x402 services": s.x402Services,
   });
 }
 
-// ── Single agent tick ─────────────────────────────
+// ── Countdown before first cycle ──────────────────
+async function startupCountdown(seconds: number): Promise<void> {
+  logger.divider("DASHBOARD READY");
+  logger.success(`Open http://localhost:${config.port} NOW`);
+  logger.info(`First payment cycle starts in ${seconds} seconds…`);
+
+  for (let i = seconds; i > 0; i -= 5) {
+    logger.agent(`Starting in ${i}s… (http://localhost:${config.port})`);
+    await sleep(Math.min(5000, i * 1000));
+  }
+  logger.agent("Firing cycle 1 NOW ▶");
+}
+
+// ── Agent tick ────────────────────────────────────
 async function tick(): Promise<void> {
   agentState.iteration++;
-  logger.agent(`Agent tick #${agentState.iteration}`);
 
-  // 1. PERCEIVE — read wallet state from Horizon + Soroban SAC
-  const wallet = await getWalletSnapshot();
+  const wallet  = await getWalletSnapshot();
+  const summary = getVaultSummary();
+  const entries = getActionableEntries();
 
-  // 2. EVALUATE — run policy engine
-  const entries = getSortedVaultEntries();
-  const evaluation = evaluatePolicy(
-    wallet,
-    entries,
-    agentState.killSwitchActive,
-    agentState.pausedCategories
+  logger.agent(
+    `Cycle #${agentState.iteration} | ` +
+    `Pending: ${entries.length} | Settled: ${summary.settled} | ` +
+    `XLM: ${parseFloat(wallet.xlmBalance).toFixed(2)} | USDC: ${parseFloat(wallet.usdcBalance).toFixed(4)}`
   );
 
+  // ── Autonomous XLM → USDC swap if needed ─────────
+  if (parseFloat(wallet.xlmBalance) > 30 && parseFloat(wallet.usdcBalance) < 2) {
+    logger.info("Agent: USDC low — initiating autonomous XLM→USDC SDEX swap…");
+    try {
+      const swap = await swapXLMForUSDC("15", "0.01");
+      recordSwapEvent(swap.hash, swap.explorerUrl, "15", swap.usdcReceived);
+      logger.success(`Autonomous swap: received ${swap.usdcReceived} USDC — tx: ${swap.explorerUrl}`);
+    } catch (e: any) {
+      logger.warn(`Swap failed: ${e.message} — will use XLM for payments`);
+    }
+  }
+
+  // ── Auto-refill XLM if low ─────────────────────
+  if (parseFloat(wallet.xlmBalance) < 10) {
+    logger.warn("XLM < 10 — auto-refilling via Friendbot…");
+    await refillViaFriendbot();
+    await sleep(4000);
+  }
+
+  if (entries.length === 0) {
+    resetX402ForNextCycle();
+    logger.agent(`All settled — x402 entries reset for next cycle`);
+    const snap = buildSnap(wallet, [], { decisions: [], totalAffordableUSDC: "0", totalRequiredUSDC: "0", walletHealthy: true, recommendation: "idle" });
+    agentState.lastSnapshot = snap;
+    recordSnapshot(snap);
+    return;
+  }
+
+  // ── Evaluate + execute ─────────────────────────
+  const evaluation = evaluatePolicy(wallet, entries, agentState.killSwitchActive, agentState.pausedCategories);
   logPolicyEvaluation(evaluation);
 
-  // 3. EXECUTE — act on each decision
-  const executableActions = evaluation.decisions.filter(
-    (d) => d.action === "EXECUTE" || d.action === "SIMULATE" || d.action === "KILL"
+  const actOn = evaluation.decisions.filter(
+    d => d.action === "EXECUTE" || d.action === "SIMULATE" || d.action === "KILL"
   );
 
-  if (executableActions.length === 0) {
-    logger.agent("No executable actions this cycle — all entries deferred or already settled");
-  }
-
-  for (const decision of executableActions) {
+  for (const decision of actOn) {
     await executeDecision(decision);
+    // Pause between EXECUTE txs so each can be seen on explorer
+    if (decision.action === "EXECUTE") {
+      logger.info("⏳ Waiting 8s between transactions (check stellar.expert)…");
+      await sleep(8000);
+    }
   }
 
-  // 4. SNAPSHOT — build full system snapshot
-  const snapshot: PulseSnapshot = {
-    timestamp: new Date(),
-    wallet,
-    vaultEntries: getAllVaultEntries(),
-    recentEvents: getRecentEvents(20),
-    agentDecisions: evaluation.decisions,
-    totalScheduledUSDC: evaluation.totalRequiredUSDC,
+  const snap = buildSnap(wallet, actOn, evaluation);
+  agentState.lastSnapshot = snap;
+  recordSnapshot(snap);
+
+  printLedger(8);
+  const x = getX402Summary();
+  if (x.totalRequests > 0) {
+    logger.snapshot("x402 Activity", { "Requests": x.totalRequests, "Paid": x.totalPaidUSDC + " USDC" });
+  }
+}
+
+function buildSnap(wallet: any, actOn: any[], evaluation: any): PulseSnapshot {
+  return {
+    timestamp: new Date(), wallet,
+    vaultEntries: getAllVaultEntries(), recentEvents: getRecentEvents(20),
+    agentDecisions: evaluation.decisions || [],
+    totalScheduledUSDC: evaluation.totalRequiredUSDC || "0",
     totalSpentUSDC: getTotalSpent(),
-    x402ServicesActive: evaluation.decisions.filter(
-      (d) => d.vaultEntry.method === "X402" && d.action !== "KILL"
-    ).length,
+    x402ServicesActive: actOn.filter((d: any) => d.vaultEntry?.method === "X402").length,
   };
-
-  agentState.lastSnapshot = snapshot;
-  recordSnapshot(snapshot);
-
-  // 5. LOG — print ledger summary
-  printLedger(10);
-
-  const x402 = getX402Summary();
-  logger.snapshot("x402 Activity Summary", {
-    "Total requests":   x402.totalRequests,
-    "Total paid (USDC)": x402.totalPaidUSDC,
-    "Active services":  x402.services.join(", ") || "none",
-  });
 }
 
-// ── Kill switch (external control) ───────────────
-export function activateKillSwitch(): void {
-  agentState.killSwitchActive = true;
-  const killed = killAllDiscretionary();
-  logger.warn(`⚡ KILL SWITCH ACTIVATED — ${killed} discretionary payments halted`);
-}
+export function activateKillSwitch()   { agentState.killSwitchActive = true;  killAllDiscretionary(); logger.warn("⚡ KILL SWITCH ON"); }
+export function deactivateKillSwitch() { agentState.killSwitchActive = false; logger.success("Kill switch OFF"); }
+export async function requestFriendbot() { return refillViaFriendbot(); }
 
-export function deactivateKillSwitch(): void {
-  agentState.killSwitchActive = false;
-  logger.success("Kill switch deactivated — agent resuming normal operations");
-}
-
-// ── Main agent loop ───────────────────────────────
 export async function startAgentLoop(): Promise<void> {
   agentState.isRunning = true;
   await bootstrap();
 
-  // First iteration — comprehensive demo snapshot
-  logger.divider("ITERATION 1 — DEMO SNAPSHOT");
+  // 35-second countdown so user can open browser first
+  await startupCountdown(35);
+
   await tick();
 
-  // Continuous loop
-  const intervalMs = config.agentLoopIntervalSeconds * 1000;
-  logger.info(`Agent loop running every ${config.agentLoopIntervalSeconds}s — Ctrl+C to stop`);
+  const ms = config.agentLoopIntervalSeconds * 1000;
+  logger.info(`Next cycle in ${config.agentLoopIntervalSeconds}s…`);
 
   while (agentState.isRunning) {
-    await sleep(intervalMs);
-    if (agentState.isRunning) {
-      await tick();
-    }
+    await sleep(ms);
+    if (agentState.isRunning) await tick();
   }
 }
 
-// ── Run standalone ────────────────────────────────
 if (process.argv[1]?.endsWith("loop.ts") || process.argv[1]?.endsWith("loop.js")) {
-  startAgentLoop().catch((err) => {
-    logger.error("Agent loop fatal error", err);
-    process.exit(1);
-  });
+  startAgentLoop().catch(e => { logger.error("Fatal", e); process.exit(1); });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+function sleep(ms: number) { return new Promise<void>(r => setTimeout(r, ms)); }

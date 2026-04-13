@@ -60,6 +60,7 @@ export interface PaymentEvent {
   x402Response?: X402PaymentReceipt;
   sacTransferDetails?: SACTransferDetails;
   error?: string;
+  explorerUrl?: string;
   timestamp: Date;
 }
 
@@ -106,3 +107,6 @@ export interface AgentLoopState {
   killSwitchActive: boolean;
   pausedCategories: PaymentPriority[];
 }
+
+// Added: explorerUrl on PaymentEvent for testnet tx links
+declare module "./index.js" {}

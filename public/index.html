@@ -1,628 +1,557 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Stellar Pulse — Autonomous Financial OS</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --bg:        #050810;
-      --surface:   #0b1120;
-      --border:    #1a2540;
-      --accent:    #00d4ff;
-      --accent2:   #7b61ff;
-      --green:     #00ff9d;
-      --yellow:    #ffc94d;
-      --red:       #ff4d6d;
-      --text:      #e2e8f8;
-      --muted:     #4a5980;
-      --mono:      'Space Mono', monospace;
-      --sans:      'Syne', sans-serif;
-    }
-
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--sans);
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-
-    /* Grid noise texture */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background-image:
-        repeating-linear-gradient(0deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px),
-        repeating-linear-gradient(90deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px);
-      opacity: 0.18;
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    /* ── Header ────────────────────────────────── */
-    header {
-      position: sticky; top: 0; z-index: 100;
-      background: rgba(5, 8, 16, 0.92);
-      backdrop-filter: blur(16px);
-      border-bottom: 1px solid var(--border);
-      padding: 0 2rem;
-      height: 64px;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-
-    .logo {
-      display: flex; align-items: center; gap: 12px;
-    }
-    .logo-pulse {
-      width: 28px; height: 28px;
-      border: 2px solid var(--accent);
-      border-radius: 50%;
-      position: relative;
-      animation: pulse-ring 2s ease-in-out infinite;
-    }
-    .logo-pulse::after {
-      content: '';
-      position: absolute;
-      inset: 4px;
-      background: var(--accent);
-      border-radius: 50%;
-    }
-    @keyframes pulse-ring {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(0,212,255,.4); }
-      50%       { box-shadow: 0 0 0 8px rgba(0,212,255,0); }
-    }
-    .logo-name {
-      font-size: 1.2rem; font-weight: 800; letter-spacing: .04em;
-      background: linear-gradient(90deg, var(--accent), var(--accent2));
-      background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .logo-tag { font-size: .7rem; color: var(--muted); font-family: var(--mono); margin-left: 4px; }
-
-    .header-right { display: flex; align-items: center; gap: 16px; }
-
-    .network-badge {
-      font-family: var(--mono); font-size: .7rem;
-      background: rgba(0,212,255,.1); border: 1px solid rgba(0,212,255,.3);
-      color: var(--accent); padding: 4px 10px; border-radius: 4px;
-    }
-
-    .kill-btn {
-      font-family: var(--mono); font-size: .75rem; font-weight: 700;
-      background: rgba(255,77,109,.1); border: 1px solid rgba(255,77,109,.4);
-      color: var(--red); padding: 6px 14px; border-radius: 4px;
-      cursor: pointer; transition: all .2s; letter-spacing: .05em;
-    }
-    .kill-btn:hover { background: rgba(255,77,109,.2); border-color: var(--red); }
-    .kill-btn.active { background: var(--red); color: #fff; }
-
-    .status-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--green);
-      animation: blink 2s ease-in-out infinite;
-    }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
-
-    /* ── Layout ────────────────────────────────── */
-    main {
-      position: relative; z-index: 1;
-      max-width: 1400px; margin: 0 auto;
-      padding: 2rem;
-      display: grid;
-      grid-template-columns: 340px 1fr;
-      grid-template-rows: auto;
-      gap: 1.5rem;
-    }
-
-    /* ── Cards ─────────────────────────────────── */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .card-header {
-      padding: 1rem 1.25rem .75rem;
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .card-title {
-      font-size: .7rem; font-weight: 600; letter-spacing: .12em;
-      text-transform: uppercase; color: var(--muted); font-family: var(--mono);
-    }
-    .card-body { padding: 1.25rem; }
-
-    /* ── Wallet card ────────────────────────────── */
-    #wallet-card { grid-column: 1; }
-
-    .balance-main {
-      font-size: 2.4rem; font-weight: 800;
-      color: var(--accent);
-      font-family: var(--mono);
-      line-height: 1;
-      margin-bottom: 4px;
-    }
-    .balance-label { font-size: .75rem; color: var(--muted); font-family: var(--mono); }
-
-    .balance-row {
-      display: flex; gap: 1rem; margin-top: 1.25rem;
-    }
-    .balance-item {
-      flex: 1;
-      background: rgba(255,255,255,.03);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: .75rem;
-    }
-    .balance-item .val {
-      font-family: var(--mono); font-size: .95rem; font-weight: 700;
-      color: var(--text);
-    }
-    .balance-item .lbl {
-      font-size: .65rem; color: var(--muted); margin-top: 2px; font-family: var(--mono);
-    }
-
-    .wallet-key {
-      margin-top: 1rem;
-      font-family: var(--mono); font-size: .65rem; color: var(--muted);
-      word-break: break-all; line-height: 1.5;
-      background: rgba(0,0,0,.3); border-radius: 6px; padding: .6rem .75rem;
-    }
-
-    /* ── Stats strip ────────────────────────────── */
-    .stats-strip {
-      grid-column: 2;
-      display: grid; grid-template-columns: repeat(4, 1fr);
-      gap: 1rem;
-    }
-    .stat-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; padding: 1.25rem;
-    }
-    .stat-val {
-      font-size: 1.6rem; font-weight: 800; font-family: var(--mono);
-      line-height: 1;
-    }
-    .stat-lbl { font-size: .65rem; color: var(--muted); margin-top: 6px; font-family: var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-    .stat-card.accent   .stat-val { color: var(--accent);  }
-    .stat-card.accent2  .stat-val { color: var(--accent2); }
-    .stat-card.green    .stat-val { color: var(--green);   }
-    .stat-card.yellow   .stat-val { color: var(--yellow);  }
-
-    /* ── Vault ──────────────────────────────────── */
-    #vault-card {
-      grid-column: 1;
-    }
-
-    .vault-entry {
-      padding: .75rem 0;
-      border-bottom: 1px solid rgba(255,255,255,.04);
-      display: grid;
-      grid-template-columns: 80px 1fr auto auto;
-      align-items: center;
-      gap: .75rem;
-      animation: fadeIn .3s ease;
-    }
-    .vault-entry:last-child { border-bottom: none; }
-
-    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
-
-    .priority-badge {
-      font-family: var(--mono); font-size: .6rem; font-weight: 700;
-      padding: 3px 7px; border-radius: 4px; text-align: center;
-      letter-spacing: .06em;
-    }
-    .p-CRITICAL    { background: rgba(255,77,109,.15); color: var(--red);    border: 1px solid rgba(255,77,109,.3); }
-    .p-HIGH        { background: rgba(255,201,77,.12); color: var(--yellow); border: 1px solid rgba(255,201,77,.3); }
-    .p-MEDIUM      { background: rgba(0,212,255,.1);   color: var(--accent); border: 1px solid rgba(0,212,255,.25); }
-    .p-LOW         { background: rgba(123,97,255,.1);  color: var(--accent2);border: 1px solid rgba(123,97,255,.3); }
-    .p-DISCRETIONARY { background: rgba(255,255,255,.05); color: var(--muted); border: 1px solid var(--border); }
-
-    .vault-label { font-size: .85rem; font-weight: 600; }
-    .vault-method { font-family: var(--mono); font-size: .6rem; color: var(--muted); margin-top: 2px; }
-    .vault-amt {
-      font-family: var(--mono); font-size: .85rem; font-weight: 700;
-      text-align: right; white-space: nowrap;
-    }
-
-    .status-pill {
-      font-family: var(--mono); font-size: .6rem; font-weight: 700;
-      padding: 2px 8px; border-radius: 20px;
-    }
-    .s-PENDING    { background: rgba(255,201,77,.1); color: var(--yellow); }
-    .s-SETTLED    { background: rgba(0,255,157,.1);  color: var(--green);  }
-    .s-FAILED     { background: rgba(255,77,109,.1); color: var(--red);    }
-    .s-KILLED     { background: rgba(255,255,255,.05); color: var(--muted);text-decoration: line-through; }
-    .s-PROCESSING { background: rgba(0,212,255,.1);  color: var(--accent); }
-
-    /* ── Ledger ─────────────────────────────────── */
-    #ledger-card {
-      grid-column: 2;
-      grid-row: 2 / 4;
-    }
-
-    .ledger-item {
-      padding: .65rem 0;
-      border-bottom: 1px solid rgba(255,255,255,.04);
-      display: grid;
-      grid-template-columns: 60px 90px 1fr auto 100px;
-      align-items: center;
-      gap: .75rem;
-      font-size: .8rem;
-      animation: fadeIn .3s ease;
-    }
-    .ledger-item:last-child { border-bottom: none; }
-    .ledger-time { font-family: var(--mono); font-size: .65rem; color: var(--muted); }
-    .ledger-method {
-      font-family: var(--mono); font-size: .6rem;
-      padding: 2px 6px; border-radius: 4px; text-align: center;
-    }
-    .m-X402         { background: rgba(0,212,255,.1); color: var(--accent);  border: 1px solid rgba(0,212,255,.2); }
-    .m-SAC_TRANSFER { background: rgba(123,97,255,.1); color: var(--accent2); border: 1px solid rgba(123,97,255,.2); }
-    .m-DIRECT       { background: rgba(0,255,157,.1); color: var(--green);   border: 1px solid rgba(0,255,157,.2); }
-    .ledger-label   { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ledger-amt     { font-family: var(--mono); text-align: right; font-weight: 700; white-space: nowrap; }
-
-    /* ── x402 Activity ──────────────────────────── */
-    #x402-card { grid-column: 1; }
-
-    .x402-endpoint {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: .6rem .75rem;
-      background: rgba(0,212,255,.04);
-      border: 1px solid rgba(0,212,255,.12);
-      border-radius: 8px;
-      margin-bottom: .5rem;
-      font-size: .8rem;
-    }
-    .x402-endpoint:last-child { margin-bottom: 0; }
-    .x402-name { font-weight: 600; }
-    .x402-price { font-family: var(--mono); font-size: .75rem; color: var(--accent); }
-    .x402-calls { font-family: var(--mono); font-size: .65rem; color: var(--muted); }
-
-    /* ── Agent console ──────────────────────────── */
-    #console-card {
-      grid-column: 1 / -1;
-    }
-
-    .console {
-      background: #020408;
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--mono);
-      font-size: .72rem;
-      max-height: 220px;
-      overflow-y: auto;
-      line-height: 1.7;
-    }
-    .console::-webkit-scrollbar { width: 4px; }
-    .console::-webkit-scrollbar-track { background: transparent; }
-    .console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-
-    .log-line { display: flex; gap: .5rem; }
-    .log-time { color: var(--muted); flex-shrink: 0; }
-    .log-icon { flex-shrink: 0; }
-    .log-info    { color: #64b5f6; }
-    .log-success { color: var(--green); }
-    .log-warn    { color: var(--yellow); }
-    .log-error   { color: var(--red); }
-    .log-agent   { color: #ce93d8; }
-    .log-x402    { color: var(--accent); }
-    .log-soroban { color: var(--accent2); }
-    .log-msg     { color: var(--text); }
-
-    /* ── Responsive ─────────────────────────────── */
-    @media (max-width: 1100px) {
-      main { grid-template-columns: 1fr; }
-      .stats-strip { grid-column: 1; grid-template-columns: repeat(2, 1fr); }
-      #ledger-card { grid-column: 1; grid-row: auto; }
-      #console-card { grid-column: 1; }
-    }
-
-    /* ── Scrollbar ──────────────────────────────── */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-    .empty-state {
-      text-align: center; padding: 2rem;
-      color: var(--muted); font-family: var(--mono); font-size: .8rem;
-    }
-
-    .refresh-hint {
-      font-family: var(--mono); font-size: .65rem; color: var(--muted);
-    }
-  </style>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Stellar Pulse</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#050810;--sf:#0b1120;--bd:#1a2540;--ac:#00d4ff;--a2:#7b61ff;--gr:#00ff9d;--yw:#ffc94d;--rd:#ff4d6d;--tx:#e2e8f8;--mu:#4a5980;--mn:'Space Mono',monospace;--sn:'Syne',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:var(--sn);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:repeating-linear-gradient(0deg,transparent,transparent 39px,var(--bd) 39px,var(--bd) 40px),repeating-linear-gradient(90deg,transparent,transparent 39px,var(--bd) 39px,var(--bd) 40px);opacity:.09}
+header{position:sticky;top:0;z-index:200;background:rgba(5,8,16,.95);backdrop-filter:blur(20px);border-bottom:1px solid var(--bd);padding:0 1.5rem;height:60px;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:10px}
+.ring{width:24px;height:24px;border:2px solid var(--ac);border-radius:50%;position:relative;animation:pr 2s ease-in-out infinite}
+.ring::after{content:'';position:absolute;inset:5px;background:var(--ac);border-radius:50%}
+@keyframes pr{0%,100%{box-shadow:0 0 0 0 rgba(0,212,255,.4)}50%{box-shadow:0 0 0 8px rgba(0,212,255,0)}}
+.lname{font-size:1.1rem;font-weight:800;background:linear-gradient(90deg,var(--ac),var(--a2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.lsub{font-size:.62rem;color:var(--mu);font-family:var(--mn);margin-left:4px}
+.hright{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.badge{font-family:var(--mn);font-size:.65rem;padding:3px 9px;border-radius:4px}
+.bn{background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);color:var(--ac)}
+.bd{background:rgba(255,201,77,.1);border:1px solid rgba(255,201,77,.3);color:var(--yw)}
+.hbtn{font-family:var(--mn);font-size:.68rem;font-weight:700;padding:5px 12px;border-radius:4px;cursor:pointer;border:1px solid;transition:all .2s;letter-spacing:.03em}
+.hbtn-kill{background:rgba(255,77,109,.1);border-color:rgba(255,77,109,.4);color:var(--rd)}
+.hbtn-kill:hover{background:rgba(255,77,109,.2)}.hbtn-kill.on{background:var(--rd);color:#fff;border-color:var(--rd)}
+.hbtn-fund{background:rgba(0,255,157,.08);border-color:rgba(0,255,157,.3);color:var(--gr)}
+.hbtn-fund:hover{background:rgba(0,255,157,.18)}
+.hbtn-swap{background:rgba(123,97,255,.1);border-color:rgba(123,97,255,.4);color:var(--a2)}
+.hbtn-swap:hover{background:rgba(123,97,255,.2)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--gr);animation:bk 2s ease-in-out infinite}
+@keyframes bk{0%,100%{opacity:1}50%{opacity:.2}}
+.tabs{position:sticky;top:60px;z-index:150;background:rgba(5,8,16,.93);backdrop-filter:blur(12px);border-bottom:1px solid var(--bd);padding:0 1.5rem;display:flex}
+.tab{font-family:var(--mn);font-size:.7rem;letter-spacing:.08em;padding:11px 18px;cursor:pointer;color:var(--mu);border-bottom:2px solid transparent;transition:all .2s;text-transform:uppercase}
+.tab:hover{color:var(--tx)}.tab.on{color:var(--ac);border-color:var(--ac)}
+.pg{display:none;position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:1.25rem 1.5rem}
+.pg.on{display:block}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:12px;overflow:hidden;margin-bottom:1.1rem}
+.ch{padding:.85rem 1.2rem .65rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.ct{font-size:.66rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mu);font-family:var(--mn)}
+.cb{padding:1.2rem}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:.85rem;margin-bottom:1.1rem}
+.stat{background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:.9rem 1.1rem}
+.sv{font-size:1.5rem;font-weight:800;font-family:var(--mn);line-height:1}
+.sl{font-size:.6rem;color:var(--mu);margin-top:4px;font-family:var(--mn);text-transform:uppercase;letter-spacing:.07em}
+.ca{color:var(--ac)}.cg{color:var(--gr)}.c2{color:var(--a2)}.cy{color:var(--yw)}.cr{color:var(--rd)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem}
+.bm{font-size:2.4rem;font-weight:800;font-family:var(--mn);color:var(--ac);line-height:1}
+.bl{font-size:.7rem;color:var(--mu);font-family:var(--mn);margin-top:2px;margin-bottom:.9rem}
+.br{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-top:.65rem}
+.bi{background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:8px;padding:.7rem}
+.bi .v{font-family:var(--mn);font-size:.9rem;font-weight:700}
+.bi .l{font-size:.6rem;color:var(--mu);margin-top:2px;font-family:var(--mn)}
+.wa{margin-top:.85rem;font-family:var(--mn);font-size:.6rem;color:var(--mu);background:rgba(0,0,0,.3);border-radius:6px;padding:.5rem .7rem;word-break:break-all;line-height:1.5}
+.wa a{color:var(--ac);text-decoration:none}
+.pbadge{font-family:var(--mn);font-size:.58rem;font-weight:700;padding:3px 7px;border-radius:4px;text-align:center;white-space:nowrap}
+.pC{background:rgba(255,77,109,.15);color:var(--rd);border:1px solid rgba(255,77,109,.3)}
+.pH{background:rgba(255,201,77,.12);color:var(--yw);border:1px solid rgba(255,201,77,.3)}
+.pM{background:rgba(0,212,255,.1);color:var(--ac);border:1px solid rgba(0,212,255,.25)}
+.pL{background:rgba(123,97,255,.1);color:var(--a2);border:1px solid rgba(123,97,255,.3)}
+.pD{background:rgba(255,255,255,.05);color:var(--mu);border:1px solid var(--bd)}
+.spill{font-family:var(--mn);font-size:.58rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.sPE{background:rgba(255,201,77,.1);color:var(--yw)}.sSE{background:rgba(0,255,157,.1);color:var(--gr)}
+.sFA{background:rgba(255,77,109,.1);color:var(--rd)}.sKI{background:rgba(255,255,255,.05);color:var(--mu)}
+.sPR{background:rgba(0,212,255,.1);color:var(--ac)}
+.vrow{display:grid;grid-template-columns:90px 1fr 100px 80px 180px;align-items:center;gap:.65rem;padding:.65rem 0;border-bottom:1px solid rgba(255,255,255,.04);animation:fi .3s ease}
+.vrow:last-child{border-bottom:none}
+@keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+.vl{font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vm{font-family:var(--mn);font-size:.56rem;color:var(--mu);margin-top:2px}
+.va{font-family:var(--mn);font-size:.82rem;font-weight:700;text-align:right;white-space:nowrap}
+.vbtns{display:flex;gap:5px}
+.vb{font-family:var(--mn);font-size:.56rem;padding:3px 7px;border-radius:4px;cursor:pointer;border:1px solid;transition:all .15s}
+.vbk{background:rgba(255,77,109,.08);border-color:rgba(255,77,109,.3);color:var(--rd)}.vbk:hover{background:rgba(255,77,109,.2)}
+.vbd{background:rgba(255,255,255,.04);border-color:var(--bd);color:var(--mu)}.vbd:hover{color:var(--rd);border-color:rgba(255,77,109,.3)}
+.vbr{background:rgba(0,255,157,.06);border-color:rgba(0,255,157,.25);color:var(--gr)}.vbr:hover{background:rgba(0,255,157,.15)}
+.lrow{display:grid;grid-template-columns:62px 85px 1fr 90px 75px 1fr;align-items:center;gap:.6rem;padding:.55rem 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:.78rem;animation:fi .3s ease}
+.lrow:last-child{border-bottom:none}
+.lt{font-family:var(--mn);font-size:.6rem;color:var(--mu)}
+.lm{font-family:var(--mn);font-size:.58rem;padding:2px 6px;border-radius:4px;text-align:center}
+.mX{background:rgba(0,212,255,.1);color:var(--ac);border:1px solid rgba(0,212,255,.2)}
+.mS{background:rgba(123,97,255,.1);color:var(--a2);border:1px solid rgba(123,97,255,.2)}
+.mSW{background:rgba(0,255,157,.1);color:var(--gr);border:1px solid rgba(0,255,157,.2)}
+.ll{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.la{font-family:var(--mn);font-weight:700;text-align:right;white-space:nowrap}
+.lx{font-family:var(--mn);font-size:.6rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lx a{color:var(--ac);text-decoration:none}.lx a:hover{text-decoration:underline}
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:.9rem}
+.fgp{display:flex;flex-direction:column;gap:5px}
+.fgp label{font-family:var(--mn);font-size:.62rem;color:var(--mu);text-transform:uppercase;letter-spacing:.07em}
+.fgp input,.fgp select{background:rgba(0,0,0,.4);border:1px solid var(--bd);color:var(--tx);font-family:var(--mn);font-size:.78rem;padding:.6rem .8rem;border-radius:6px;outline:none;transition:border-color .2s}
+.fgp input:focus,.fgp select:focus{border-color:var(--ac)}
+.fgp select option{background:#0b1120}
+.ff{grid-column:1/-1}
+.sbtn{margin-top:.65rem;padding:.7rem 1.4rem;border-radius:6px;cursor:pointer;font-family:var(--mn);font-size:.75rem;font-weight:700;letter-spacing:.05em;background:rgba(0,212,255,.12);border:1px solid rgba(0,212,255,.4);color:var(--ac);transition:all .2s}
+.sbtn:hover{background:rgba(0,212,255,.22)}
+.fm{font-family:var(--mn);font-size:.7rem;margin-top:.65rem;padding:.5rem .8rem;border-radius:4px;display:none}
+.fm.ok{background:rgba(0,255,157,.1);color:var(--gr);border:1px solid rgba(0,255,157,.3);display:block}
+.fm.er{background:rgba(255,77,109,.1);color:var(--rd);border:1px solid rgba(255,77,109,.3);display:block}
+.pbtns{display:flex;gap:.65rem;flex-wrap:wrap}
+.pb{font-family:var(--mn);font-size:.68rem;padding:5px 12px;border-radius:4px;cursor:pointer;background:rgba(0,255,157,.06);border:1px solid rgba(0,255,157,.25);color:var(--gr);transition:all .15s}
+.pb:hover{background:rgba(0,255,157,.15)}
+.console{background:#020408;border-radius:8px;padding:.85rem;font-family:var(--mn);font-size:.68rem;max-height:220px;overflow-y:auto;line-height:1.7}
+.console::-webkit-scrollbar{width:3px}.console::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+.cl{display:flex;gap:8px}.clt{color:var(--mu);flex-shrink:0}.cli{flex-shrink:0}.clm{color:var(--tx)}
+.li{color:#64b5f6}.ls{color:var(--gr)}.lw{color:var(--yw)}.le{color:var(--rd)}.la_{color:#ce93d8}.lx_{color:var(--ac)}.lso{color:var(--a2)}
+.empty{text-align:center;padding:1.5rem;color:var(--mu);font-family:var(--mn);font-size:.75rem}
+.th{font-family:var(--mn);font-size:.6rem;color:var(--mu)}
+.banner{background:linear-gradient(135deg,rgba(0,255,157,.05),rgba(0,212,255,.05));border:1px solid rgba(0,255,157,.2);border-radius:10px;padding:.85rem 1.1rem;margin-bottom:1.1rem;display:flex;align-items:flex-start;gap:.9rem}
+.bi2{font-size:1.3rem;flex-shrink:0;margin-top:2px}
+.bt{font-size:.82rem;font-weight:700;margin-bottom:3px}
+.bb{font-family:var(--mn);font-size:.65rem;color:var(--mu);line-height:1.65}
+.bb a{color:var(--ac);text-decoration:none}.bb a:hover{text-decoration:underline}
+.bb code{background:rgba(255,255,255,.07);padding:1px 5px;border-radius:3px}
+.swap-event{display:flex;align-items:center;justify-content:space-between;padding:.65rem .9rem;background:rgba(0,255,157,.04);border:1px solid rgba(0,255,157,.12);border-radius:8px;margin-bottom:.5rem}
+.swap-event:last-child{margin-bottom:0}
+.countdown{background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:.75rem 1rem;font-family:var(--mn);font-size:.72rem;color:var(--ac);text-align:center;animation:fi .5s ease;margin-bottom:.75rem}
+@media(max-width:1000px){.stats{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}.vrow{grid-template-columns:80px 1fr 90px}.vrow .vbtns,.vrow .spill{display:none}.lrow{grid-template-columns:62px 75px 1fr 80px}.lrow .lx,.lrow :last-child:not(.la){display:none}.fg{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
-
 <header>
   <div class="logo">
-    <div class="logo-pulse"></div>
-    <div>
-      <div class="logo-name">STELLAR PULSE</div>
-    </div>
-    <span class="logo-tag">autonomous financial os</span>
+    <div class="ring"></div>
+    <div><div class="lname">STELLAR PULSE</div></div>
+    <span class="lsub">autonomous financial os</span>
   </div>
-  <div class="header-right">
-    <span class="refresh-hint" id="last-refresh">—</span>
-    <span class="network-badge" id="network-badge">stellar:testnet</span>
-    <div class="status-dot" id="status-dot"></div>
-    <button class="kill-btn" id="kill-btn" onclick="toggleKillSwitch()">⚡ KILL SWITCH</button>
+  <div class="hright">
+    <span class="th" id="last-ref">—</span>
+    <span class="badge bn">stellar:testnet</span>
+    <span class="badge bd" id="demo-badge">DEMO x402</span>
+    <div class="dot"></div>
+    <button class="hbtn hbtn-fund"  onclick="doFriendbot()">💧 TESTNET XLM</button>
+    <button class="hbtn hbtn-swap"  onclick="doSwap()">⇄ SWAP XLM→USDC</button>
+    <button class="hbtn hbtn-kill" id="kbtn" onclick="toggleKill()">⚡ KILL SWITCH</button>
   </div>
 </header>
+<nav class="tabs">
+  <div class="tab on"  onclick="tab('ov')">Overview</div>
+  <div class="tab"     onclick="tab('vault')">Priority Vault</div>
+  <div class="tab"     onclick="tab('add')">+ Add Payment</div>
+  <div class="tab"     onclick="tab('ledger')">Ledger</div>
+  <div class="tab"     onclick="tab('x402')">x402 Services</div>
+</nav>
 
-<main>
+<!-- OVERVIEW -->
+<div class="pg on" id="pg-ov">
+  <div class="stats">
+    <div class="stat"><div class="sv ca" id="s-cyc">0</div><div class="sl">Agent Cycle</div></div>
+    <div class="stat"><div class="sv cg" id="s-set">0</div><div class="sl">Settled Txs</div></div>
+    <div class="stat"><div class="sv c2" id="s-x4">0</div><div class="sl">x402 Requests</div></div>
+    <div class="stat"><div class="sv cy" id="s-sp">0</div><div class="sl">XLM Spent</div></div>
+    <div class="stat"><div class="sv cr" id="s-sw">0</div><div class="sl">SDEX Swaps</div></div>
+  </div>
 
-  <!-- ── Wallet Card ───────────────────────────── -->
-  <div class="card" id="wallet-card">
-    <div class="card-header">
-      <span class="card-title">Wallet Health</span>
-      <span class="refresh-hint">Soroban SAC</span>
-    </div>
-    <div class="card-body">
-      <div class="balance-main" id="usdc-balance">—</div>
-      <div class="balance-label">USDC Available</div>
-      <div class="balance-row">
-        <div class="balance-item">
-          <div class="val" id="xlm-balance">—</div>
-          <div class="lbl">XLM (fees)</div>
-        </div>
-        <div class="balance-item">
-          <div class="val" id="total-spent">—</div>
-          <div class="lbl">USDC Spent</div>
-        </div>
+  <div class="banner">
+    <div class="bi2">⛓</div>
+    <div>
+      <div class="bt">Live Stellar Testnet — Real Verifiable Transactions</div>
+      <div class="bb">
+        Every <strong style="color:var(--gr)">SAC_TRANSFER</strong> payment submits a real XLM tx to Stellar testnet. Click any tx hash in the Ledger to verify on
+        <a href="https://stellar.expert/explorer/testnet" target="_blank">stellar.expert/explorer/testnet ↗</a><br>
+        Agent auto-swaps XLM→USDC via <strong style="color:var(--a2)">Stellar SDEX</strong> (on-chain DEX) when USDC is low.
+        💧 refill via Friendbot · ⇄ trigger SDEX swap manually anytime.
       </div>
-      <div class="wallet-key" id="wallet-key">Loading wallet…</div>
     </div>
   </div>
 
-  <!-- ── Stats Strip ───────────────────────────── -->
-  <div class="stats-strip">
-    <div class="stat-card accent">
-      <div class="stat-val" id="stat-iteration">0</div>
-      <div class="stat-lbl">Agent Cycle</div>
+  <div class="g2">
+    <div class="card">
+      <div class="ch"><span class="ct">Wallet</span><span class="th">Horizon + Testnet</span></div>
+      <div class="cb">
+        <div class="bm" id="xlm-b">—</div>
+        <div class="bl">XLM Balance</div>
+        <div class="br">
+          <div class="bi"><div class="v" id="usdc-b">—</div><div class="l">USDC (after swap)</div></div>
+          <div class="bi"><div class="v" id="spent-b">—</div><div class="l">XLM Spent Total</div></div>
+        </div>
+        <div class="wa" id="waddr">Loading…</div>
+      </div>
     </div>
-    <div class="stat-card green">
-      <div class="stat-val" id="stat-settled">0</div>
-      <div class="stat-lbl">Settled</div>
-    </div>
-    <div class="stat-card accent2">
-      <div class="stat-val" id="stat-x402">0</div>
-      <div class="stat-lbl">x402 Requests</div>
-    </div>
-    <div class="stat-card yellow">
-      <div class="stat-val" id="stat-vault">0</div>
-      <div class="stat-lbl">Vault Entries</div>
-    </div>
-  </div>
-
-  <!-- ── Priority Vault ───────────────────────── -->
-  <div class="card" id="vault-card">
-    <div class="card-header">
-      <span class="card-title">Priority Vault</span>
-      <span class="refresh-hint">CRITICAL → DISCRETIONARY</span>
-    </div>
-    <div class="card-body" id="vault-list">
-      <div class="empty-state">Loading vault…</div>
+    <div class="card">
+      <div class="ch"><span class="ct">Recent Transactions</span><span class="th">click hash → stellar.expert</span></div>
+      <div class="cb" id="recent-evts"><div class="empty">Awaiting transactions…</div></div>
     </div>
   </div>
 
-  <!-- ── Ledger of Life ───────────────────────── -->
-  <div class="card" id="ledger-card">
-    <div class="card-header">
-      <span class="card-title">Ledger of Life</span>
-      <span class="refresh-hint">all payment events</span>
-    </div>
-    <div class="card-body" id="ledger-list">
-      <div class="empty-state">Awaiting transactions…</div>
-    </div>
+  <!-- SDEX Swaps card -->
+  <div class="card" id="swap-card" style="display:none">
+    <div class="ch"><span class="ct">SDEX Swaps — XLM → USDC</span><span class="th">on-chain Stellar DEX · real txs</span></div>
+    <div class="cb" id="swap-list"></div>
   </div>
 
-  <!-- ── x402 Activity ────────────────────────── -->
-  <div class="card" id="x402-card">
-    <div class="card-header">
-      <span class="card-title">x402 Services</span>
-      <span class="refresh-hint">pay-per-use</span>
-    </div>
-    <div class="card-body" id="x402-list">
-      <div class="empty-state">Loading services…</div>
+  <div class="card">
+    <div class="ch"><span class="ct">Agent Console</span><span class="th" id="cyc-st">starting…</span></div>
+    <div class="cb"><div class="console" id="console"></div></div>
+  </div>
+</div>
+
+<!-- VAULT -->
+<div class="pg" id="pg-vault">
+  <div class="banner">
+    <div class="bi2">◈</div>
+    <div>
+      <div class="bt">How Payments Execute</div>
+      <div class="bb">
+        <strong style="color:var(--gr)">SAC_TRANSFER</strong> → real XLM payment on Stellar testnet via <code>Operation.payment</code> — traceable on stellar.expert<br>
+        <strong style="color:var(--ac)">X402</strong> → HTTP 402 → Soroban auth entry signing → Coinbase facilitator settles on-chain<br>
+        Agent auto-swaps XLM→USDC via SDEX when USDC balance drops below threshold.
+      </div>
     </div>
   </div>
+  <div class="card">
+    <div class="ch"><span class="ct">Priority Vault</span><span class="th">CRITICAL executes first</span></div>
+    <div class="cb" id="vault-list"><div class="empty">Loading…</div></div>
+  </div>
+</div>
 
-  <!-- ── Agent Console ─────────────────────────── -->
-  <div class="card" id="console-card">
-    <div class="card-header">
-      <span class="card-title">Agent Console</span>
-      <span class="refresh-hint">live log stream</span>
-    </div>
-    <div class="card-body">
-      <div class="console" id="console-log"></div>
+<!-- ADD PAYMENT -->
+<div class="pg" id="pg-add">
+  <div class="card">
+    <div class="ch"><span class="ct">Add Payment Obligation</span><span class="th">queued for next agent cycle</span></div>
+    <div class="cb">
+      <div class="fg">
+        <div class="fgp"><label>Label *</label><input id="f-l" placeholder="e.g. Server Bill"/></div>
+        <div class="fgp"><label>Priority *</label>
+          <select id="f-p">
+            <option value="CRITICAL">CRITICAL — rent, payroll</option>
+            <option value="HIGH">HIGH — loans, scheduled</option>
+            <option value="MEDIUM" selected>MEDIUM — tools, APIs</option>
+            <option value="LOW">LOW — optional</option>
+            <option value="DISCRETIONARY">DISCRETIONARY — per-use</option>
+          </select>
+        </div>
+        <div class="fgp"><label>Method *</label>
+          <select id="f-m" onchange="toggleX402()">
+            <option value="SAC_TRANSFER">SAC_TRANSFER — real XLM tx on testnet</option>
+            <option value="X402">X402 — pay-per-use HTTP micropayment</option>
+          </select>
+        </div>
+        <div class="fgp"><label>Amount (XLM) *</label><input type="number" id="f-a" placeholder="1" step="0.001" min="0.001"/></div>
+        <div class="fgp ff"><label>Recipient Stellar Address *</label><input id="f-addr" placeholder="GXXXX…"/></div>
+        <div class="fgp ff" id="x402f" style="display:none"><label>x402 Endpoint URL</label><input id="f-ep" placeholder="http://localhost:4022/api/market-data"/></div>
+        <div class="fgp"><label>Memo (optional, max 28 chars)</label><input id="f-memo" maxlength="28" placeholder="PULSE:INVOICE-001"/></div>
+        <div class="fgp"><label>Description (optional)</label><input id="f-desc" placeholder="Brief description"/></div>
+      </div>
+      <button class="sbtn" onclick="addEntry()">＋ Add to Priority Vault</button>
+      <div class="fm" id="fmsg"></div>
     </div>
   </div>
+  <div class="card">
+    <div class="ch"><span class="ct">Quick Presets</span><span class="th">prefill form</span></div>
+    <div class="cb"><div class="pbtns">
+      <button class="pb" onclick="pre('rent')">🏠 Rent (real XLM tx)</button>
+      <button class="pb" onclick="pre('pay')">👥 Payroll (real XLM tx)</button>
+      <button class="pb" onclick="pre('saas')">⚡ SaaS (x402)</button>
+      <button class="pb" onclick="pre('agent')">🤖 Agent Task (x402)</button>
+      <button class="pb" onclick="pre('data')">📡 Data Feed (x402)</button>
+    </div></div>
+  </div>
+</div>
 
-</main>
+<!-- LEDGER -->
+<div class="pg" id="pg-ledger">
+  <div class="card">
+    <div class="ch"><span class="ct">Ledger of Life</span><span class="th">all events · click hash to verify on-chain</span></div>
+    <div class="cb" id="ledger-list"><div class="empty">Awaiting transactions…</div></div>
+  </div>
+</div>
+
+<!-- x402 -->
+<div class="pg" id="pg-x402">
+  <div class="banner">
+    <div class="bi2">₄₀₂</div>
+    <div>
+      <div class="bt">x402 Protocol Flow on Stellar</div>
+      <div class="bb">
+        <strong>1.</strong> <code>GET /api/endpoint</code><br>
+        <strong>2.</strong> Server: <code>402 + { price, network: "stellar:testnet" }</code><br>
+        <strong>3.</strong> Agent signs <strong>Soroban auth entry</strong> via <code>ExactStellarScheme + createEd25519Signer</code><br>
+        <strong>4.</strong> Retry with <code>X-PAYMENT</code> header<br>
+        <strong>5.</strong> <a href="https://www.x402.org/facilitator" target="_blank">Coinbase x402 Facilitator</a> settles USDC on stellar:testnet<br>
+        <strong>6.</strong> <code>200 OK</code> + resource delivered<br><br>
+        Packages: <code>@x402/express@2.9</code> · <code>@x402/fetch@2.9</code> · <code>@x402/stellar@2.9</code>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="ct">Active x402 Services</span></div>
+    <div class="cb" id="x402-svcs"><div class="empty">Loading…</div></div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="ct">Session Summary</span></div>
+    <div class="cb"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.85rem">
+      <div class="bi"><div class="v ca" id="x4r">0</div><div class="l">Requests</div></div>
+      <div class="bi"><div class="v cg" id="x4p">0</div><div class="l">USDC Paid</div></div>
+      <div class="bi"><div class="v c2" id="x4s">0</div><div class="l">Services</div></div>
+    </div></div>
+  </div>
+</div>
 
 <script>
-  const API = '';
-  let killSwitchActive = false;
-  const consoleLogs = [];
+const PRI=['CRITICAL','HIGH','MEDIUM','LOW','DISCRETIONARY'];
+const PCLS={CRITICAL:'pC',HIGH:'pH',MEDIUM:'pM',LOW:'pL',DISCRETIONARY:'pD'};
+const SCLS={PENDING:'sPE',SETTLED:'sSE',FAILED:'sFA',KILLED:'sKI',PROCESSING:'sPR'};
+let kill=false, logs=[], lastEvtCnt=0;
 
-  function addLog(level, icon, message) {
-    const now = new Date().toTimeString().slice(0,8);
-    consoleLogs.push({ time: now, level, icon, message });
-    if (consoleLogs.length > 80) consoleLogs.shift();
-    renderConsole();
-  }
+function tab(n){
+  const ns=['ov','vault','add','ledger','x402'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',ns[i]===n));
+  document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
+  document.getElementById('pg-'+n).classList.add('on');
+}
 
-  function renderConsole() {
-    const el = document.getElementById('console-log');
-    el.innerHTML = consoleLogs.map(l =>
-      `<div class="log-line">
-        <span class="log-time">${l.time}</span>
-        <span class="log-icon log-${l.level}">${l.icon}</span>
-        <span class="log-msg">${l.message}</span>
-      </div>`
-    ).join('');
-    el.scrollTop = el.scrollHeight;
-  }
+function log(lvl,ic,msg){
+  const t=new Date().toTimeString().slice(0,8);
+  logs.push({t,lvl,ic,msg});
+  if(logs.length>150)logs.shift();
+  const el=document.getElementById('console');
+  if(el){el.innerHTML=logs.map(l=>`<div class="cl"><span class="clt">${l.t}</span><span class="cli ${l.lvl}">${l.ic}</span><span class="clm">${escHtml(l.msg)}</span></div>`).join('');el.scrollTop=el.scrollHeight;}
+}
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-  function priorityColor(p) {
-    return { CRITICAL:'red', HIGH:'yellow', MEDIUM:'accent', LOW:'accent2', DISCRETIONARY:'muted' }[p] || 'muted';
-  }
+async function refresh(){
+  try{
+    const r=await fetch('/api/snapshot');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    const evts=d.events||[], vault=d.vault||[], swaps=d.swaps||[];
 
-  async function fetchSnapshot() {
-    try {
-      const r = await fetch(`${API}/api/snapshot`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return await r.json();
-    } catch(e) {
-      addLog('error', '✗', `Fetch failed: ${e.message}`);
-      return null;
-    }
-  }
+    // Stats
+    document.getElementById('s-cyc').textContent=d.agent?.iteration||0;
+    document.getElementById('s-set').textContent=evts.filter(e=>e.status==='SETTLED').length;
+    document.getElementById('s-x4').textContent=d.x402Summary?.totalRequests||0;
+    document.getElementById('s-sp').textContent=parseFloat(d.totalSpentXLM||'0').toFixed(3);
+    document.getElementById('s-sw').textContent=swaps.length;
 
-  function renderWallet(wallet, totalSpent) {
-    const usdc = parseFloat(wallet?.usdcBalance || '0');
-    document.getElementById('usdc-balance').textContent = usdc.toFixed(2);
-    document.getElementById('xlm-balance').textContent  = parseFloat(wallet?.xlmBalance || '0').toFixed(2);
-    document.getElementById('total-spent').textContent  = parseFloat(totalSpent || '0').toFixed(4);
-    const key = wallet?.publicKey || '';
-    document.getElementById('wallet-key').textContent   = key ? `${key.slice(0,20)}…${key.slice(-8)}` : 'No wallet';
-  }
+    // Wallet
+    const xlm=parseFloat(d.wallet?.xlmBalance||'0');
+    document.getElementById('xlm-b').textContent=xlm.toFixed(2);
+    document.getElementById('usdc-b').textContent=parseFloat(d.wallet?.usdcBalance||'0').toFixed(4);
+    document.getElementById('spent-b').textContent=parseFloat(d.totalSpentXLM||'0').toFixed(4);
+    const k=d.wallet?.publicKey||'';
+    const exp=`https://stellar.expert/explorer/testnet/account/${k}`;
+    document.getElementById('waddr').innerHTML=k&&k!=='NOT_CONFIGURED'
+      ?`${k.slice(0,20)}…${k.slice(-8)} <a href="${exp}" target="_blank" style="color:var(--ac)">↗ explorer</a>`
+      :'No wallet configured';
 
-  function renderStats(data) {
-    document.getElementById('stat-iteration').textContent = data.agent?.iteration || 0;
-    document.getElementById('stat-settled').textContent   = (data.events || []).filter(e => e.status === 'SETTLED').length;
-    document.getElementById('stat-x402').textContent      = data.x402Summary?.totalRequests || 0;
-    document.getElementById('stat-vault').textContent     = (data.vault || []).length;
-  }
+    // Kill btn
+    kill=!!d.agent?.killSwitchActive;
+    const kb=document.getElementById('kbtn');
+    kb.classList.toggle('on',kill);
+    kb.textContent=kill?'⚡ KILL ON':'⚡ KILL SWITCH';
 
-  function renderVault(vault) {
-    const el = document.getElementById('vault-list');
-    if (!vault?.length) { el.innerHTML = '<div class="empty-state">No vault entries</div>'; return; }
+    // Cycle status
+    const pending=vault.filter(e=>e.status==='PENDING').length;
+    const settled=vault.filter(e=>e.status==='SETTLED').length;
+    const cs=document.getElementById('cyc-st');
+    if(cs) cs.textContent=`cycle #${d.agent?.iteration||0} · ${pending} pending · ${settled} settled`;
 
-    const order = ['CRITICAL','HIGH','MEDIUM','LOW','DISCRETIONARY'];
-    const sorted = [...vault].sort((a,b) => order.indexOf(a.priority) - order.indexOf(b.priority));
+    document.getElementById('last-ref').textContent='updated '+new Date().toTimeString().slice(0,8);
+    const db=document.getElementById('demo-badge');
+    if(db) db.style.display=d.demoMode===false?'none':'';
 
-    el.innerHTML = sorted.map(e => `
-      <div class="vault-entry">
-        <span class="priority-badge p-${e.priority}">${e.priority}</span>
+    // Recent events
+    const rEl=document.getElementById('recent-evts');
+    const rec=evts.slice(-8).reverse();
+    rEl.innerHTML=rec.length?rec.map(e=>eventRow(e,true)).join(''):'<div class="empty">No events yet — agent executing…</div>';
+
+    // Vault
+    const vEl=document.getElementById('vault-list');
+    const sorted=[...vault].sort((a,b)=>PRI.indexOf(a.priority)-PRI.indexOf(b.priority));
+    vEl.innerHTML=sorted.length?sorted.map(vaultRow).join(''):'<div class="empty">No entries — add one in "+ Add Payment"</div>';
+
+    // Ledger
+    const lEl=document.getElementById('ledger-list');
+    lEl.innerHTML=evts.length?[...evts].reverse().map(e=>ledgerRow(e)).join(''):'<div class="empty">No transactions yet</div>';
+
+    // SDEX swaps
+    const sc=document.getElementById('swap-card');
+    const sl=document.getElementById('swap-list');
+    if(swaps.length){
+      sc.style.display='';
+      sl.innerHTML=swaps.map(s=>`<div class="swap-event">
         <div>
-          <div class="vault-label">${e.label}</div>
-          <div class="vault-method">${e.method}${e.x402Endpoint ? ' · x402' : ''}</div>
+          <div style="font-weight:600;font-size:.82rem">⇄ ${s.xlmSpent} XLM → ${parseFloat(s.usdcReceived).toFixed(4)} USDC</div>
+          <div style="font-family:var(--mn);font-size:.6rem;color:var(--mu);margin-top:2px">${new Date(s.timestamp).toTimeString().slice(0,8)} · Stellar SDEX on-chain swap</div>
         </div>
-        <div class="vault-amt">${parseFloat(e.amountUSDC).toFixed(e.amountUSDC.includes('.') && parseFloat(e.amountUSDC) < 1 ? 4 : 2)} USDC</div>
-        <span class="status-pill s-${e.status}">${e.status}</span>
-      </div>
-    `).join('');
-  }
-
-  function renderLedger(events) {
-    const el = document.getElementById('ledger-list');
-    if (!events?.length) { el.innerHTML = '<div class="empty-state">No transactions yet</div>'; return; }
-
-    const recent = [...events].reverse().slice(0, 30);
-    el.innerHTML = recent.map(e => {
-      const time = new Date(e.timestamp).toTimeString().slice(0,8);
-      const amt  = parseFloat(e.amountUSDC);
-      const amtFmt = amt < 0.01 ? amt.toFixed(4) : amt.toFixed(2);
-      const txRef = e.txHash
-        ? `<a href="https://stellar.expert/explorer/testnet/tx/${e.txHash}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:.6rem">${e.txHash.slice(0,10)}…</a>`
-        : (e.x402Response?.facilitatorSettlementTxHash
-          ? `<span style="color:var(--accent2);font-size:.6rem">${e.x402Response.facilitatorSettlementTxHash.slice(0,10)}…</span>`
-          : '—');
-
-      return `
-        <div class="ledger-item">
-          <span class="ledger-time">${time}</span>
-          <span class="ledger-method m-${e.method}">${e.method}</span>
-          <span class="ledger-label">${e.label}</span>
-          <span class="ledger-amt" style="color:var(--${e.status==='SETTLED'?'green':e.status==='FAILED'?'red':'yellow'})">${amtFmt} USDC</span>
-          <span class="status-pill s-${e.status}">${e.status}</span>
-        </div>`;
-    }).join('');
-  }
-
-  function renderX402(vault) {
-    const el = document.getElementById('x402-list');
-    const services = (vault || []).filter(e => e.method === 'X402');
-    if (!services.length) { el.innerHTML = '<div class="empty-state">No x402 services active</div>'; return; }
-
-    el.innerHTML = services.map(s => {
-      const amt = parseFloat(s.amountUSDC);
-      const price = amt < 0.01 ? `$${amt.toFixed(4)}` : `$${amt.toFixed(2)}`;
-      return `
-        <div class="x402-endpoint">
-          <div>
-            <div class="x402-name">${s.label}</div>
-            <div class="x402-calls">${s.x402Endpoint || 'endpoint not set'}</div>
-          </div>
-          <div style="text-align:right">
-            <div class="x402-price">${price}/req</div>
-            <div class="x402-calls">${s.status}</div>
-          </div>
-        </div>`;
-    }).join('');
-  }
-
-  async function refresh() {
-    const data = await fetchSnapshot();
-    if (!data) return;
-
-    renderWallet(data.wallet, data.totalSpentUSDC);
-    renderStats(data);
-    renderVault(data.vault);
-    renderLedger(data.events);
-    renderX402(data.vault);
-
-    killSwitchActive = data.agent?.killSwitchActive || false;
-    const btn = document.getElementById('kill-btn');
-    btn.classList.toggle('active', killSwitchActive);
-    btn.textContent = killSwitchActive ? '⚡ KILL ACTIVE' : '⚡ KILL SWITCH';
-
-    document.getElementById('last-refresh').textContent =
-      `updated ${new Date().toTimeString().slice(0,8)}`;
-
-    // Add agent log entry
-    if (data.agent?.iteration > 0) {
-      addLog('agent', '⟳', `Cycle #${data.agent.iteration} — ${data.vaultSummary?.pending || 0} pending obligations`);
+        <a href="${s.explorerUrl}" target="_blank" style="font-family:var(--mn);font-size:.65rem;color:var(--gr);text-decoration:none">${s.txHash.slice(0,14)}… ↗</a>
+      </div>`).join('');
     }
 
-    // Log recent settled events
-    const settled = (data.events || []).filter(e => e.status === 'SETTLED').slice(-2);
-    for (const e of settled) {
-      if (e.method === 'X402') {
-        addLog('x402', '₄₀₂', `${e.label} — ${parseFloat(e.amountUSDC).toFixed(4)} USDC settled via x402`);
-      } else {
-        addLog('soroban', '◈', `${e.label} — SAC transfer: ${parseFloat(e.amountUSDC).toFixed(2)} USDC`);
-      }
+    // x402 services
+    const xEl=document.getElementById('x402-svcs');
+    const xs=vault.filter(e=>e.method==='X402');
+    xEl.innerHTML=xs.length?xs.map(s=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:.65rem .85rem;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.1);border-radius:8px;margin-bottom:.5rem">
+      <div><div style="font-weight:600;font-size:.82rem">${s.label}</div><div style="font-family:var(--mn);font-size:.6rem;color:var(--mu);margin-top:2px">${s.x402Endpoint||'—'}</div></div>
+      <div style="text-align:right"><div style="font-family:var(--mn);font-size:.88rem;color:var(--ac);font-weight:700">$${parseFloat(s.amountUSDC)<0.01?parseFloat(s.amountUSDC).toFixed(4):parseFloat(s.amountUSDC).toFixed(2)}/req</div><div style="font-family:var(--mn);font-size:.6rem;color:var(--mu)">${s.status}</div></div>
+    </div>`).join(''):'<div class="empty">No x402 services — add one with method X402</div>';
+    document.getElementById('x4r').textContent=d.x402Summary?.totalRequests||0;
+    document.getElementById('x4p').textContent=parseFloat(d.x402Summary?.totalPaidUSDC||'0').toFixed(5);
+    document.getElementById('x4s').textContent=(d.x402Summary?.services||[]).length;
+
+    // Log new events
+    if(evts.length>lastEvtCnt){
+      evts.slice(lastEvtCnt).forEach(e=>{
+        if(e.txHash) log('ls','✓',`REAL TX: ${e.label} — ${e.amountUSDC} XLM → ${e.explorerUrl||e.txHash.slice(0,16)+'…'}`);
+        else if(e.method==='X402') log('lx_','₄₀₂',`x402: ${e.label} — ${e.amountUSDC} USDC [${e.status}]`);
+      });
+      lastEvtCnt=evts.length;
     }
-  }
+    if((d.agent?.iteration||0)>0) log('la_','⟳',`Cycle #${d.agent.iteration} · ${pending} pending · ${xlm.toFixed(2)} XLM`);
 
-  async function toggleKillSwitch() {
-    killSwitchActive = !killSwitchActive;
-    await fetch(`${API}/api/agent/kill-switch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: killSwitchActive }),
-    });
-    addLog('warn', '⚠', `Kill switch ${killSwitchActive ? 'ACTIVATED' : 'deactivated'}`);
-    await refresh();
-  }
+  }catch(e){log('le','✗','API: '+e.message);}
+}
 
-  // ── Boot ──────────────────────────────────────
-  addLog('info', '◦', 'Stellar Pulse dashboard initializing…');
-  addLog('soroban', '◈', 'Connecting to Soroban RPC (stellar:testnet)…');
-  addLog('x402', '₄₀₂', 'x402 facilitator: https://www.x402.org/facilitator');
+function eventRow(e, short=false){
+  const t=new Date(e.timestamp).toTimeString().slice(0,8);
+  const amt=parseFloat(e.amountUSDC);
+  const fmt=amt<0.01?amt.toFixed(5):amt.toFixed(3);
+  const col=e.status==='SETTLED'?'var(--gr)':e.status==='FAILED'?'var(--rd)':'var(--yw)';
+  const tx=e.txHash?`<a href="https://stellar.expert/explorer/testnet/tx/${e.txHash}" target="_blank" style="color:var(--ac);font-family:var(--mn);font-size:.6rem;text-decoration:none">${e.txHash.slice(0,12)}… ↗</a>`
+    :e.x402Response?.facilitatorSettlementTxHash?`<span style="font-family:var(--mn);font-size:.6rem;color:var(--a2)">${e.x402Response.facilitatorSettlementTxHash.slice(0,12)}…</span>`
+    :'<span style="color:var(--mu);font-size:.6rem">—</span>';
+  if(short) return `<div style="display:grid;grid-template-columns:62px 75px 1fr 80px 100px;align-items:center;gap:.6rem;padding:.5rem 0;border-bottom:1px solid rgba(255,255,255,.04)">
+    <span class="lt">${t}</span><span class="lm ${e.method==='X402'?'mX':'mS'}">${e.method==='X402'?'X402':'XLM TX'}</span>
+    <span style="font-weight:600;font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.label}</span>
+    <span style="font-family:var(--mn);font-weight:700;text-align:right;color:${col}">${fmt}</span>
+    <span>${tx}</span></div>`;
+  return '';
+}
 
+function ledgerRow(e){
+  const t=new Date(e.timestamp).toTimeString().slice(0,8);
+  const amt=parseFloat(e.amountUSDC);
+  const fmt=amt<0.01?amt.toFixed(5):amt.toFixed(3);
+  const col=e.status==='SETTLED'?'var(--gr)':e.status==='FAILED'?'var(--rd)':'var(--yw)';
+  const tx=e.txHash
+    ?`<a href="https://stellar.expert/explorer/testnet/tx/${e.txHash}" target="_blank" style="color:var(--ac);text-decoration:none;font-family:var(--mn);font-size:.6rem">${e.txHash.slice(0,16)}… ↗</a>`
+    :e.x402Response?.facilitatorSettlementTxHash
+      ?`<span style="color:var(--a2);font-family:var(--mn);font-size:.6rem">${e.x402Response.facilitatorSettlementTxHash.slice(0,14)}…</span>`
+      :'<span style="color:var(--mu);font-size:.6rem">pending</span>';
+  return `<div class="lrow">
+    <span class="lt">${t}</span>
+    <span class="lm ${e.method==='X402'?'mX':'mS'}">${e.method==='X402'?'X402':'XLM TX'}</span>
+    <span class="ll">${e.label}</span>
+    <span class="la" style="color:${col}">${fmt} XLM</span>
+    <span class="spill ${SCLS[e.status]||'sPE'}">${e.status}</span>
+    <span class="lx">${tx}</span>
+  </div>`;
+}
+
+function vaultRow(e){
+  const amt=parseFloat(e.amountUSDC);
+  const fmt=amt<0.01?amt.toFixed(5):amt.toFixed(2);
+  const col=e.status==='SETTLED'?'var(--gr)':e.status==='FAILED'?'var(--rd)':'var(--tx)';
+  const ep=e.x402Endpoint?e.x402Endpoint.replace('http://localhost:4022','local').slice(0,35):'';
+  return `<div class="vrow">
+    <span class="pbadge ${PCLS[e.priority]||'pD'}">${e.priority}</span>
+    <div><div class="vl">${e.label}</div><div class="vm">${e.method}${ep?' · '+ep:''}</div></div>
+    <div class="va" style="color:${col}">${fmt} XLM</div>
+    <span class="spill ${SCLS[e.status]||'sPE'}">${e.status}</span>
+    <div class="vbtns">
+      ${e.status==='PENDING'?`<button class="vb vbk" onclick="killE('${e.id}')">Kill</button>`:''}
+      ${e.status!=='PENDING'?`<button class="vb vbr" onclick="resetE('${e.id}')">Reset</button>`:''}
+      <button class="vb vbd" onclick="delE('${e.id}')">✕ Delete</button>
+    </div>
+  </div>`;
+}
+
+// Actions
+async function killE(id){await fetch(`/api/vault/${id}/kill`,{method:'POST'});log('lw','⚠','Entry killed');refresh();}
+async function resetE(id){await fetch(`/api/vault/${id}/reset`,{method:'POST'});log('li','◦','Entry reset → PENDING');refresh();}
+async function delE(id){if(!confirm('Delete this entry?'))return;await fetch(`/api/vault/${id}`,{method:'DELETE'});log('lw','✗','Entry deleted');refresh();}
+
+async function toggleKill(){
+  kill=!kill;
+  await fetch('/api/agent/kill-switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:kill})});
+  log('lw','⚠',kill?'⚡ KILL SWITCH ACTIVATED':'Kill switch deactivated');
   refresh();
-  setInterval(refresh, 5000);
+}
+
+async function doFriendbot(){
+  log('li','◦','Requesting 10,000 testnet XLM from Friendbot…');
+  const r=await fetch('/api/friendbot',{method:'POST'});
+  const d=await r.json();
+  if(d.success) log('ls','✓','Friendbot: '+d.message);
+  else log('lw','⚠','Friendbot: '+(d.message||d.error));
+  setTimeout(refresh,4000);
+}
+
+async function doSwap(){
+  log('lso','⇄','Triggering SDEX swap: 15 XLM → USDC on-chain…');
+  const r=await fetch('/api/swap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({xlmAmount:'15'})});
+  const d=await r.json();
+  if(d.success) log('ls','✓',`SDEX swap confirmed: ${d.usdcReceived} USDC received → ${d.explorerUrl}`);
+  else log('le','✗','Swap failed: '+(d.error||'no liquidity'));
+  setTimeout(refresh,4000);
+}
+
+// Form
+function toggleX402(){document.getElementById('x402f').style.display=document.getElementById('f-m').value==='X402'?'':'none';}
+const PRESETS={
+  rent: {l:'Rent Payment',p:'CRITICAL',m:'SAC_TRANSFER',a:'1',addr:'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ',memo:'PULSE:RENT',desc:'Monthly rent via XLM payment',ep:''},
+  pay:  {l:'Staff Payroll',p:'CRITICAL',m:'SAC_TRANSFER',a:'1',addr:'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q',memo:'PULSE:PAYROLL',desc:'Monthly salary',ep:''},
+  saas: {l:'SaaS Analytics (x402)',p:'HIGH',m:'X402',a:'0.005',addr:'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q',memo:'x402:saas',desc:'Analytics via x402',ep:'http://localhost:4022/api/analytics'},
+  agent:{l:'AI Research (x402)',p:'LOW',m:'X402',a:'0.005',addr:'GCFONE23AB7Y6C5XTEWARNJ3I3VWMS7IGHIVCAHOI3KKNCD44DTIWJXQ',memo:'x402:agent',desc:'Agent task',ep:'http://localhost:4022/api/research'},
+  data: {l:'Market Data (x402)',p:'MEDIUM',m:'X402',a:'0.001',addr:'GCFONE23AB7Y6C5XTEWARNJ3I3VWMS7IGHIVCAHOI3KKNCD44DTIWJXQ',memo:'x402:data',desc:'Market data feed',ep:'http://localhost:4022/api/market-data'},
+};
+function pre(k){
+  tab('add');
+  const p=PRESETS[k];
+  document.getElementById('f-l').value=p.l;
+  document.getElementById('f-p').value=p.p;
+  document.getElementById('f-m').value=p.m;
+  document.getElementById('f-a').value=p.a;
+  document.getElementById('f-addr').value=p.addr;
+  document.getElementById('f-memo').value=p.memo;
+  document.getElementById('f-desc').value=p.desc;
+  document.getElementById('f-ep').value=p.ep||'';
+  toggleX402();
+}
+
+async function addEntry(){
+  const msg=document.getElementById('fmsg');
+  msg.className='fm';
+  const l=document.getElementById('f-l').value.trim();
+  const p=document.getElementById('f-p').value;
+  const m=document.getElementById('f-m').value;
+  const a=document.getElementById('f-a').value.trim();
+  const addr=document.getElementById('f-addr').value.trim();
+  const ep=document.getElementById('f-ep').value.trim();
+  const memo=document.getElementById('f-memo').value.trim();
+  const desc=document.getElementById('f-desc').value.trim();
+  if(!l||!a||!addr){msg.textContent='Label, Amount, and Address are required.';msg.className='fm er';return;}
+  if(isNaN(+a)||+a<=0){msg.textContent='Amount must be positive.';msg.className='fm er';return;}
+  if(!addr.match(/^[GC][A-Z0-9]{55}$/)){msg.textContent='Invalid Stellar address (G or C, 56 chars).';msg.className='fm er';return;}
+  try{
+    const r=await fetch('/api/vault',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:l,priority:p,method:m,amountUSDC:a,recipientAddress:addr,x402Endpoint:ep||undefined,memo:memo||undefined,description:desc||''})});
+    if(!r.ok)throw new Error(await r.text());
+    msg.textContent=`✓ "${l}" added — executes next cycle`;
+    msg.className='fm ok';
+    log('ls','✓',`Vault: [${p}] ${l} — ${a} XLM queued`);
+    ['f-l','f-a','f-addr','f-ep','f-memo','f-desc'].forEach(id=>document.getElementById(id).value='');
+    refresh();
+  }catch(e){msg.textContent='Error: '+e.message;msg.className='fm er';}
+}
+
+// Boot
+log('li','◦','Stellar Pulse initializing…');
+log('lso','◈','Connecting to Stellar testnet…');
+log('lx_','₄₀₂','x402 facilitator: www.x402.org/facilitator');
+log('li','◦','Agent will auto-fund via Friendbot + swap XLM→USDC');
+refresh();
+setInterval(refresh,4000);
 </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-# Stellar Pulse 🌐
+# Pulse 
 
 > **An Autonomous Financial OS built on Stellar** — a self-managing AI agent that handles real-money obligations (rent, payroll, APIs) using on-chain USDC payments, XLM↔USDC swaps via the Stellar DEX, and x402 HTTP micropayments.
 

@@ -5,9 +5,10 @@
 //  so you can open http://localhost:4021 before
 //  cycle 1 fires.
 //
-//  Auto-swap: if XLM > 50 and USDC < 10, the agent
-//  autonomously swaps XLM → USDC via Stellar SDEX.
-//  This is a real on-chain DEX tx, traceable on explorer.
+//  Funding logic:
+//    - Start with XLM from Friendbot (10,000 XLM)
+//    - Only call Friendbot again when XLM drops below 5
+//    - Auto-swap XLM → USDC only if USDC < 5 (small top-up)
 // ─────────────────────────────────────────────────
 
 import { config } from "../utils/config.js";
@@ -41,7 +42,6 @@ async function bootstrap(): Promise<void> {
   logger.info(`Loop:     Every ${config.agentLoopIntervalSeconds}s`);
   logger.info(`x402:     ${config.demoMode ? "DEMO mode" : "LIVE mode"}`);
 
-  // Auto-generate + fund wallet
   const keypair = await ensureTestnetWallet();
   logger.success(`Wallet:   ${keypair.publicKey()}`);
   logger.info(`View:     https://stellar.expert/explorer/testnet/account/${keypair.publicKey()}`);
@@ -50,15 +50,14 @@ async function bootstrap(): Promise<void> {
   logger.info(`XLM:      ${parseFloat(wallet.xlmBalance).toFixed(2)}`);
   logger.info(`USDC:     ${parseFloat(wallet.usdcBalance).toFixed(4)}`);
 
-  // Auto-refill if XLM is low
-  if (parseFloat(wallet.xlmBalance) < 20) {
-    logger.warn("XLM < 20 — requesting Friendbot refill…");
+  // Only refill if wallet is nearly empty
+  if (parseFloat(wallet.xlmBalance) < 5) {
+    logger.warn("XLM < 5 — requesting Friendbot refill…");
     await refillViaFriendbot(keypair.publicKey());
     await sleep(4000);
   }
 
-  // Auto-swap XLM → USDC if USDC balance is near zero
-  // (gives the agent real USDC to show in the dashboard)
+  // Small USDC top-up so dashboard shows a non-zero USDC balance
   const refreshed = await getWalletSnapshot();
   if (parseFloat(refreshed.xlmBalance) > 50 && parseFloat(refreshed.usdcBalance) < 5) {
     logger.info("USDC < 5 — auto-swapping 20 XLM → USDC via Stellar SDEX…");
@@ -109,7 +108,14 @@ async function tick(): Promise<void> {
     `XLM: ${parseFloat(wallet.xlmBalance).toFixed(2)} | USDC: ${parseFloat(wallet.usdcBalance).toFixed(4)}`
   );
 
-  // ── Autonomous XLM → USDC swap if needed ─────────
+  // Only refill when nearly empty (< 5 XLM)
+  if (parseFloat(wallet.xlmBalance) < 5) {
+    logger.warn("XLM < 5 — auto-refilling via Friendbot…");
+    await refillViaFriendbot();
+    await sleep(4000);
+  }
+
+  // Small USDC top-up mid-cycle if needed
   if (parseFloat(wallet.xlmBalance) > 30 && parseFloat(wallet.usdcBalance) < 2) {
     logger.info("Agent: USDC low — initiating autonomous XLM→USDC SDEX swap…");
     try {
@@ -121,13 +127,6 @@ async function tick(): Promise<void> {
     }
   }
 
-  // ── Auto-refill XLM if low ─────────────────────
-  if (parseFloat(wallet.xlmBalance) < 10) {
-    logger.warn("XLM < 10 — auto-refilling via Friendbot…");
-    await refillViaFriendbot();
-    await sleep(4000);
-  }
-
   if (entries.length === 0) {
     resetX402ForNextCycle();
     logger.agent(`All settled — x402 entries reset for next cycle`);
@@ -137,7 +136,6 @@ async function tick(): Promise<void> {
     return;
   }
 
-  // ── Evaluate + execute ─────────────────────────
   const evaluation = evaluatePolicy(wallet, entries, agentState.killSwitchActive, agentState.pausedCategories);
   logPolicyEvaluation(evaluation);
 
@@ -147,7 +145,6 @@ async function tick(): Promise<void> {
 
   for (const decision of actOn) {
     await executeDecision(decision);
-    // Pause between EXECUTE txs so each can be seen on explorer
     if (decision.action === "EXECUTE") {
       logger.info("⏳ Waiting 8s between transactions (check stellar.expert)…");
       await sleep(8000);
@@ -184,7 +181,6 @@ export async function startAgentLoop(): Promise<void> {
   agentState.isRunning = true;
   await bootstrap();
 
-  // 35-second countdown so user can open browser first
   await startupCountdown(35);
 
   await tick();

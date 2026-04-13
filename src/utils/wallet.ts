@@ -2,11 +2,12 @@
 //  Stellar Pulse — Wallet Utility
 //
 //  Real Stellar testnet transactions:
-//  1. XLM payments via Operation.payment (Horizon)
+//  1. USDC payments via SAC transfer (Stellar Asset Contract)
 //  2. XLM → USDC swap via SDEX pathPayment (on-chain DEX)
-//     Both are traceable on stellar.expert/explorer/testnet
+//  3. XLM payments (fallback only)
+//  All are traceable on stellar.expert/explorer/testnet
 //
-//  Friendbot auto-funds on startup + on low balance.
+//  Friendbot: only requested when XLM balance is near zero.
 // ─────────────────────────────────────────────────
 
 import {
@@ -38,7 +39,6 @@ function horizon() { return new Horizon.Server(HORIZON); }
 export async function ensureTestnetWallet(): Promise<Keypair> {
   if (config.secretKey && config.secretKey.startsWith("S") && config.secretKey.length === 56) {
     const kp = Keypair.fromSecret(config.secretKey);
-    // Update publicKey in config if missing
     if (!config.publicKey) (config as any).publicKey = kp.publicKey();
     return kp;
   }
@@ -46,7 +46,6 @@ export async function ensureTestnetWallet(): Promise<Keypair> {
   const keypair = Keypair.random();
   logger.info(`New keypair: ${keypair.publicKey()}`);
 
-  // Fund via Friendbot
   logger.info("Calling Friendbot for 10,000 XLM…");
   const res = await fetch(`${FRIENDBOT}?addr=${keypair.publicKey()}`);
   if (!res.ok) {
@@ -55,7 +54,6 @@ export async function ensureTestnetWallet(): Promise<Keypair> {
   }
   logger.success(`Wallet funded: https://stellar.expert/explorer/testnet/account/${keypair.publicKey()}`);
 
-  // Write to .env
   const envPath = path.resolve(__dirname, "../../.env");
   try {
     let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
@@ -69,7 +67,7 @@ export async function ensureTestnetWallet(): Promise<Keypair> {
   (config as any).secretKey = keypair.secret();
   (config as any).publicKey = keypair.publicKey();
 
-  await sleep(4000); // wait for account to be created
+  await sleep(4000);
   return keypair;
 }
 
@@ -107,6 +105,7 @@ export async function getWalletSnapshot(): Promise<WalletSnapshot> {
 }
 
 // ── Friendbot refill ──────────────────────────────
+// Only call this when XLM is nearly exhausted (< 2 XLM)
 export async function refillViaFriendbot(addr?: string): Promise<boolean> {
   const address = addr || config.publicKey || (config.secretKey ? getKeypair().publicKey() : "");
   if (!address) return false;
@@ -132,14 +131,12 @@ export async function ensureUSDCTrustline(): Promise<string | null> {
   const h = horizon();
   try {
     const acct = await h.loadAccount(keypair.publicKey());
-    // Check if trustline already exists
     for (const b of acct.balances) {
       if (b.asset_type === "credit_alphanum4" && b.asset_code === "USDC") {
         logger.info("USDC trustline already exists");
         return null;
       }
     }
-    // Add trustline
     logger.info("Adding USDC trustline…");
     const tx = new TransactionBuilder(acct, { fee: "1000", networkPassphrase: NET_PASS })
       .addOperation(Operation.changeTrust({ asset: USDC_ASSET, limit: "100000" }))
@@ -157,8 +154,8 @@ export async function ensureUSDCTrustline(): Promise<string | null> {
 }
 
 // ── XLM → USDC swap via Stellar SDEX ─────────────
-// Uses pathPaymentStrictReceive to swap XLM for USDC
-// This is a real on-chain DEX transaction, traceable on stellar.expert
+// Uses pathPaymentStrictSend to swap XLM for as much USDC as possible.
+// This is a real on-chain DEX transaction, traceable on stellar.expert.
 export async function swapXLMForUSDC(
   xlmToSpend: string,
   minUSDCOut: string
@@ -166,23 +163,23 @@ export async function swapXLMForUSDC(
   const keypair = getKeypair();
   const h = horizon();
 
-  // Ensure trustline first
   await ensureUSDCTrustline();
   await sleep(2000);
 
   const acct = await h.loadAccount(keypair.publicKey());
 
-  logger.info(`SDEX Swap: up to ${xlmToSpend} XLM → USDC (min ${minUSDCOut} USDC)`);
+  logger.info(`SDEX Swap: ${xlmToSpend} XLM → USDC (min ${minUSDCOut} USDC)`);
 
+  // Use pathPaymentStrictSend: spend exactly xlmToSpend XLM, receive as much USDC as possible
   const tx = new TransactionBuilder(acct, { fee: "10000", networkPassphrase: NET_PASS })
     .addOperation(
-      Operation.pathPaymentStrictReceive({
-        sendAsset:   Asset.native(),          // spending XLM
-        sendMax:     xlmToSpend,              // max XLM to spend
-        destination: keypair.publicKey(),     // receiving to same wallet
-        destAsset:   USDC_ASSET,              // getting USDC
-        destAmount:  minUSDCOut,              // minimum USDC to receive
-        path: [],                             // Stellar finds best path
+      Operation.pathPaymentStrictSend({
+        sendAsset:    Asset.native(),
+        sendAmount:   xlmToSpend,
+        destination:  keypair.publicKey(),
+        destAsset:    USDC_ASSET,
+        destMin:      minUSDCOut,
+        path:         [],
       })
     )
     .addMemo(Memo.text("PULSE:XLM-USDC-SWAP"))
@@ -195,7 +192,6 @@ export async function swapXLMForUSDC(
   const hash = (result as any).hash;
   const url  = `${EXPLORER}/${hash}`;
 
-  // Read new USDC balance
   await sleep(3000);
   const snap = await getWalletSnapshot();
 
@@ -204,6 +200,60 @@ export async function swapXLMForUSDC(
   logger.info(`New USDC balance: ${snap.usdcBalance}`);
 
   return { hash, explorerUrl: url, usdcReceived: snap.usdcBalance };
+}
+
+// ── Submit real USDC payment ──────────────────────
+// Sends USDC via Stellar payment operation (SAC-backed asset transfer).
+// The recipient must have a USDC trustline on testnet.
+export async function submitUSDCPayment(
+  toAddress: string,
+  amountUSDC: string,
+  memoText?: string
+): Promise<{ hash: string; explorerUrl: string }> {
+  if (!StrKey.isValidEd25519PublicKey(toAddress)) {
+    throw new Error(`Invalid destination: ${toAddress}`);
+  }
+
+  const keypair = getKeypair();
+  const h = horizon();
+
+  // Ensure destination has USDC trustline — if not, we fall back to XLM payment
+  // (on testnet, demo recipient accounts may not have USDC trustlines)
+  let asset: Asset;
+  try {
+    const destAcct = await h.loadAccount(toAddress);
+    const hasTrustline = destAcct.balances.some(
+      (b: any) => b.asset_type === "credit_alphanum4" && b.asset_code === "USDC" && b.asset_issuer === USDC_ISSUER
+    );
+    asset = hasTrustline ? USDC_ASSET : Asset.native();
+    if (!hasTrustline) {
+      logger.warn(`Destination lacks USDC trustline — sending XLM equivalent instead`);
+      // Convert USDC amount to approximate XLM (1 XLM ≈ $0.09)
+      amountUSDC = (parseFloat(amountUSDC) / 0.09).toFixed(7);
+    }
+  } catch {
+    // Destination account may not exist on testnet — use XLM as fallback
+    asset = Asset.native();
+    logger.warn(`Destination account not found on testnet — using XLM fallback`);
+    amountUSDC = Math.min(parseFloat(amountUSDC) / 0.09, 50).toFixed(7);
+  }
+
+  const acct = await h.loadAccount(keypair.publicKey());
+
+  let builder = new TransactionBuilder(acct, { fee: "1000", networkPassphrase: NET_PASS })
+    .addOperation(Operation.payment({ destination: toAddress, asset, amount: amountUSDC }));
+
+  if (memoText) builder = builder.addMemo(Memo.text(memoText.slice(0, 28)));
+
+  const tx = builder.setTimeout(30).build();
+  tx.sign(keypair);
+
+  const result = await h.submitTransaction(tx);
+  const hash = (result as any).hash;
+  const explorerUrl = `${EXPLORER}/${hash}`;
+
+  logger.success(`Real TX: ${explorerUrl}`);
+  return { hash, explorerUrl };
 }
 
 // ── Submit real XLM payment ───────────────────────
@@ -236,7 +286,7 @@ export async function submitXLMPayment(
   return { hash, explorerUrl };
 }
 
-// Alias used by executor
+// Alias used by older code paths
 export const executeTestnetPayment = submitXLMPayment;
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }

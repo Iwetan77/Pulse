@@ -1,10 +1,5 @@
 // ─────────────────────────────────────────────────
 //  Stellar Pulse — Priority Vault
-//
-//  Entries use small XLM amounts so real testnet
-//  payments don't drain the wallet quickly.
-//  SAC_TRANSFER = real XLM tx on testnet
-//  X402         = x402 micropayment flow
 // ─────────────────────────────────────────────────
 
 import { v4 as uuidv4 } from "uuid";
@@ -19,16 +14,13 @@ export function seedDemoVault(agentPublicKey: string): void {
   if (seeded) return;
   seeded = true;
 
-  // Small XLM amounts — real payments, but wallet stays funded
-  // 1 XLM ≈ $0.09 — small enough for demo, real enough to prove testnet
   const entries: Omit<VaultEntry,"id"|"createdAt">[] = [
     {
       label: "Rent — PULSE Demo",
-      description: "Real XLM payment on Stellar testnet (simulating USDC rent)",
+      description: "Monthly rent payment on Stellar testnet",
       priority: "CRITICAL",
-      // Public testnet address (Stellar's own testnet account)
       recipientAddress: "GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR",
-      amountUSDC: "1",   // 1 XLM — real testnet payment
+      amountUSDC: "20",
       method: "SAC_TRANSFER",
       memo: "PULSE:RENT",
       status: "PENDING",
@@ -36,33 +28,33 @@ export function seedDemoVault(agentPublicKey: string): void {
     },
     {
       label: "Payroll — PULSE Demo",
-      description: "Real XLM payment on Stellar testnet (simulating salary)",
+      description: "Employee salary payment on Stellar testnet",
       priority: "CRITICAL",
-      recipientAddress: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q",
-      amountUSDC: "1",
+      recipientAddress: "GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR",
+      amountUSDC: "30",
       method: "SAC_TRANSFER",
       memo: "PULSE:PAYROLL",
       status: "PENDING",
       tags: ["payroll","critical","real-tx"],
     },
     {
-      label: "Analytics API (x402)",
-      description: "x402 HTTP micropayment — Soroban auth entry flow",
+      label: "Cloud Infrastructure (x402)",
+      description: "Pay-per-use cloud compute via x402",
       priority: "HIGH",
-      recipientAddress: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q",
-      amountUSDC: "0.005",
+      recipientAddress: "GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR",
+      amountUSDC: "25",
       method: "X402",
       x402Endpoint: "http://localhost:4022/api/analytics",
-      memo: "x402:analytics",
+      memo: "x402:cloud",
       status: "PENDING",
-      tags: ["saas","x402"],
+      tags: ["saas","x402","infrastructure"],
     },
     {
-      label: "Market Data (x402)",
-      description: "x402 pay-per-request market data feed",
+      label: "Market Data Feed (x402)",
+      description: "Real-time Stellar market data — agent pays per request",
       priority: "MEDIUM",
-      recipientAddress: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGMREASRD1SUFKPKBZNL1Q",
-      amountUSDC: "0.001",
+      recipientAddress: "GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR",
+      amountUSDC: "20",
       method: "X402",
       x402Endpoint: "http://localhost:4022/api/market-data",
       memo: "x402:market-data",
@@ -71,10 +63,10 @@ export function seedDemoVault(agentPublicKey: string): void {
     },
     {
       label: "AI Research Agent (x402)",
-      description: "Agent-to-agent task payment via x402",
+      description: "Agent-to-agent task payment — autonomous research delegation",
       priority: "LOW",
-      recipientAddress: "GCFONE23AB7Y6C5XTEWARNJ3I3VWMS7IGHIVCAHOI3KKNCD44DTIWJXQ",
-      amountUSDC: "0.005",
+      recipientAddress: "GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR",
+      amountUSDC: "20",
       method: "X402",
       x402Endpoint: "http://localhost:4022/api/research",
       memo: "x402:research",
@@ -82,11 +74,11 @@ export function seedDemoVault(agentPublicKey: string): void {
       tags: ["agent","x402"],
     },
     {
-      label: "Weather Feed (x402)",
-      description: "Discretionary weather data per request",
+      label: "Weather Intelligence (x402)",
+      description: "Discretionary weather data for agent decision-making",
       priority: "DISCRETIONARY",
-      recipientAddress: "GCFONE23AB7Y6C5XTEWARNJ3I3VWMS7IGHIVCAHOI3KKNCD44DTIWJXQ",
-      amountUSDC: "0.001",
+      recipientAddress: "GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR",
+      amountUSDC: "20",
       method: "X402",
       x402Endpoint: "http://localhost:4022/api/weather",
       memo: "x402:weather",
@@ -96,7 +88,9 @@ export function seedDemoVault(agentPublicKey: string): void {
   ];
 
   for (const e of entries) {
-    vault.set(uuidv4(), { ...e, id: uuidv4(), createdAt: new Date() });
+    // FIX: use the SAME id for both the map key and the entry object
+    const id = uuidv4();
+    vault.set(id, { ...e, id, createdAt: new Date() });
   }
   logger.info(`Vault seeded: ${vault.size} entries (2 real XLM txs + ${vault.size-2} x402)`);
 }
@@ -153,7 +147,7 @@ export function getVaultSummary() {
     failed:             all.filter(e=>e.status==="FAILED").length,
     x402Services:       all.filter(e=>e.method==="X402").length,
     realTxEntries:      all.filter(e=>e.method==="SAC_TRANSFER").length,
-    totalScheduledUSDC: pending.reduce((s,e)=>s+parseFloat(e.amountUSDC),0).toFixed(7),
+    totalScheduledUSDC: pending.reduce((s,e)=>s+parseFloat(e.amountUSDC),0).toFixed(2),
     byPriority: Object.fromEntries(["CRITICAL","HIGH","MEDIUM","LOW","DISCRETIONARY"].map(p=>[p,all.filter(e=>e.priority===p).length])),
   };
 }

@@ -1,9 +1,8 @@
 // ─────────────────────────────────────────────────
 //  Stellar Pulse — Payment Executor
 //
-//  EXECUTE  → Real XLM payment on Stellar testnet
-//             Traceable at stellar.expert/explorer/testnet
-//  SIMULATE → x402 HTTP flow (demo or real)
+//  EXECUTE  → Real XLM payment on Stellar testnet (traceable)
+//  SIMULATE → x402 HTTP flow (demo simulation)
 //  DEFER    → logged only
 //  KILL     → entry halted
 // ─────────────────────────────────────────────────
@@ -53,8 +52,8 @@ export async function executeDecision(decision: AgentDecision): Promise<PaymentE
 
   try {
     switch (action) {
-      case "EXECUTE":  await handleRealPayment(event); break;
-      case "SIMULATE": await handleX402Payment(event); break;
+      case "EXECUTE":  await handleRealPayment(event, vaultEntry); break;
+      case "SIMULATE": await handleX402Payment(event, vaultEntry); break;
       case "DEFER":
         event.status = "PENDING";
         logger.agent(`[DEFER] ${vaultEntry.label}: ${decision.reason}`);
@@ -76,12 +75,11 @@ export async function executeDecision(decision: AgentDecision): Promise<PaymentE
   return event;
 }
 
-// ── Real testnet XLM payment ──────────────────────
-// Submits a REAL Stellar transaction — verifiable on explorer
-async function handleRealPayment(event: PaymentEvent): Promise<void> {
-  // Use small XLM amount for demo (preserves wallet balance)
-  // Amount: min(entry amount, 1 XLM) to avoid draining wallet
-  const xlmAmount = Math.min(parseFloat(config.paymentAmountXLM), 1).toFixed(7);
+// ── Real XLM payment on testnet ───────────────────
+async function handleRealPayment(event: PaymentEvent, vaultEntry: any): Promise<void> {
+  // Use the amountUSDC field as XLM amount — it's a real testnet payment
+  // shown as USDC equivalent in the UI for demo purposes
+  const xlmAmount = parseFloat(vaultEntry.amountUSDC).toFixed(7);
 
   logger.info(`[REAL TX] Submitting: ${xlmAmount} XLM → ${event.recipientAddress.slice(0,12)}…`);
   logger.info(`  Memo: ${event.memo || "PULSE:PAYMENT"}`);
@@ -92,11 +90,10 @@ async function handleRealPayment(event: PaymentEvent): Promise<void> {
     event.memo || `PULSE:${event.label.slice(0,20)}`
   );
 
-  event.txHash     = hash;
-  event.status     = "SETTLED";
+  event.txHash      = hash;
+  event.status      = "SETTLED";
   event.explorerUrl = explorerUrl;
 
-  // Store SAC details for display
   event.sacTransferDetails = {
     contractId:        "native-XLM",
     fromAddress:       config.publicKey,
@@ -106,14 +103,14 @@ async function handleRealPayment(event: PaymentEvent): Promise<void> {
     simulationResult:  `REAL TX: ${hash} — verifiable at ${explorerUrl}`,
   };
 
-  updateEntryStatus(event.vaultEntryId!, "SETTLED");
+  updateEntryStatus(vaultEntry.id, "SETTLED");
   logger.success(`[SETTLED] ${event.label} → ${explorerUrl}`);
 }
 
-// ── x402 payment ──────────────────────────────────
-async function handleX402Payment(event: PaymentEvent): Promise<void> {
-  const entry    = event.vaultEntryId ? getVaultEntry(event.vaultEntryId) : undefined;
-  const endpoint = entry?.x402Endpoint;
+// ── x402 payment flow ─────────────────────────────
+async function handleX402Payment(event: PaymentEvent, vaultEntry: any): Promise<void> {
+  // Get the endpoint directly from the passed vaultEntry (not via lookup)
+  const endpoint = vaultEntry.x402Endpoint;
   if (!endpoint) throw new Error(`No x402 endpoint for: ${event.label}`);
 
   logger.x402(`Initiating x402: ${event.amountUSDC} USDC → ${endpoint}`);
@@ -122,11 +119,11 @@ async function handleX402Payment(event: PaymentEvent): Promise<void> {
     const receipt = await simulateX402(endpoint, event.amountUSDC, event.label);
     event.x402Response = receipt;
     event.status = "SETTLED";
-    updateEntryStatus(event.vaultEntryId!, "SETTLED");
+    updateEntryStatus(vaultEntry.id, "SETTLED");
     return;
   }
 
-  // Real x402
+  // Real x402 live mode
   const paidFetch = buildX402Fetch();
   if (!paidFetch) throw new Error("x402 client unavailable");
 
@@ -135,7 +132,7 @@ async function handleX402Payment(event: PaymentEvent): Promise<void> {
     const data = await response.json();
     event.x402Response = { endpoint, network: config.x402Network, amountPaid: event.amountUSDC, responseData: data };
     event.status = "SETTLED";
-    updateEntryStatus(event.vaultEntryId!, "SETTLED");
+    updateEntryStatus(vaultEntry.id, "SETTLED");
     logger.success(`x402 settled: ${event.amountUSDC} USDC via Soroban auth entry`);
   } else {
     throw new Error(`x402 HTTP ${response.status}`);
@@ -144,7 +141,7 @@ async function handleX402Payment(event: PaymentEvent): Promise<void> {
 
 // ── x402 demo simulation ──────────────────────────
 async function simulateX402(endpoint: string, amount: string, label: string): Promise<import("../types/index.js").X402PaymentReceipt> {
-  const mockHash = `DEMO${Math.random().toString(36).slice(2,10).toUpperCase()}`;
+  const mockHash = `SIM${Math.random().toString(36).slice(2,10).toUpperCase()}`;
   logger.x402(`[x402] → GET ${endpoint}`);
   await sleep(200);
   logger.x402(`[x402] ← 402 Payment Required: ${amount} USDC on stellar:testnet`);

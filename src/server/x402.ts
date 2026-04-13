@@ -50,7 +50,7 @@ const paymentConfig: Parameters<typeof paymentMiddlewareFromConfig>[0] = {
   "GET /api/market-data": {
     accepts: {
       scheme: "exact",
-      price: "$0.001",
+      price: "$20.00",
       network: NETWORK,
       payTo: PAY_TO,
     },
@@ -62,7 +62,7 @@ const paymentConfig: Parameters<typeof paymentMiddlewareFromConfig>[0] = {
   "GET /api/research": {
     accepts: {
       scheme: "exact",
-      price: "$0.005",
+      price: "$25.00",
       network: NETWORK,
       payTo: PAY_TO,
     },
@@ -74,7 +74,7 @@ const paymentConfig: Parameters<typeof paymentMiddlewareFromConfig>[0] = {
   "GET /api/weather": {
     accepts: {
       scheme: "exact",
-      price: "$0.001",
+      price: "$20.00",
       network: NETWORK,
       payTo: PAY_TO,
     },
@@ -86,7 +86,7 @@ const paymentConfig: Parameters<typeof paymentMiddlewareFromConfig>[0] = {
   "GET /api/analytics": {
     accepts: {
       scheme: "exact",
-      price: "$25.00",
+      price: "$30.00",
       network: NETWORK,
       payTo: PAY_TO,
     },

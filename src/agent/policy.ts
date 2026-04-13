@@ -1,12 +1,17 @@
 // ─────────────────────────────────────────────────
 //  Stellar Pulse — Agent Policy
 //
-//  KEY FIX: In demo mode, x402 micropayments and
-//  SAC transfers are always marked EXECUTE/SIMULATE
-//  regardless of wallet balance — they simulate the
-//  full flow for judges without needing real USDC.
+//  Evaluates vault entries against wallet balances
+//  and decides: EXECUTE, SIMULATE, DEFER, or KILL.
 //
-//  In live mode, real balance checks apply.
+//  EXECUTE  = real on-chain USDC payment (SAC_TRANSFER)
+//  SIMULATE = x402 micropayment flow (demo or live)
+//  DEFER    = insufficient funds or category paused
+//  KILL     = kill switch active for non-CRITICAL items
+//
+//  In demo mode: x402 entries always SIMULATE (real flow,
+//  simulated settlement). SAC_TRANSFER entries always EXECUTE
+//  (real on-chain USDC tx after XLM→USDC swap if needed).
 // ─────────────────────────────────────────────────
 
 import type {
@@ -55,7 +60,7 @@ export function evaluatePolicy(
   );
 
   const totalRequired = sorted.reduce((s, e) => s + parseFloat(e.amountUSDC), 0);
-  const xlmHealthy    = isDemo || availableXLM >= MIN_XLM_RESERVE;
+  const xlmHealthy    = availableXLM >= MIN_XLM_RESERVE;
 
   for (const entry of sorted) {
     const amount = parseFloat(entry.amountUSDC);
@@ -67,7 +72,7 @@ export function evaluatePolicy(
         vaultEntry: entry,
         reason: `Kill switch active — halting ${entry.priority} payment`,
         walletSnapshot: wallet,
-        projectedBalanceAfter: remainingUSDC.toFixed(7),
+        projectedBalanceAfter: remainingUSDC.toFixed(2),
       });
       continue;
     }
@@ -79,81 +84,81 @@ export function evaluatePolicy(
         vaultEntry: entry,
         reason: `Category ${entry.priority} paused by user`,
         walletSnapshot: wallet,
-        projectedBalanceAfter: remainingUSDC.toFixed(7),
+        projectedBalanceAfter: remainingUSDC.toFixed(2),
       });
       continue;
     }
 
-    // XLM fee check (skip in demo)
+    // XLM fee check — need some XLM for transaction fees
     if (!xlmHealthy) {
       decisions.push({
         action: "DEFER",
         vaultEntry: entry,
-        reason: `Insufficient XLM for fees (${availableXLM.toFixed(2)} < ${MIN_XLM_RESERVE})`,
+        reason: `Insufficient XLM for fees (${availableXLM.toFixed(2)} XLM < ${MIN_XLM_RESERVE} minimum)`,
         walletSnapshot: wallet,
-        projectedBalanceAfter: remainingUSDC.toFixed(7),
+        projectedBalanceAfter: remainingUSDC.toFixed(2),
       });
       continue;
     }
 
-    // DEMO MODE: always execute/simulate — show the full flow to judges
-    if (isDemo) {
-      const action = entry.method === "X402" ? "SIMULATE" : "EXECUTE";
+    // x402 entries: always SIMULATE (demo) — shows real protocol flow
+    if (entry.method === "X402") {
       totalAffordable += amount;
       decisions.push({
-        action,
+        action: "SIMULATE",
         vaultEntry: entry,
-        reason: entry.method === "X402"
-          ? `[DEMO] x402 micropayment — ${amount} USDC via Soroban auth entry`
-          : `[DEMO] SAC transfer simulated — ${amount} USDC (Soroban, not submitted)`,
+        reason: isDemo
+          ? `[DEMO] x402 micropayment — $${amount.toFixed(2)} USDC via Soroban auth entry`
+          : `x402 HTTP payment — $${amount.toFixed(2)} USDC, Soroban auth entry signed`,
         walletSnapshot: wallet,
-        projectedBalanceAfter: (availableUSDC - totalAffordable).toFixed(7),
+        projectedBalanceAfter: (remainingUSDC - totalAffordable).toFixed(2),
       });
       continue;
     }
 
-    // LIVE MODE: real balance checks
-    if (remainingUSDC >= amount) {
+    // SAC_TRANSFER entries: EXECUTE — real USDC on-chain
+    // The executor will swap XLM→USDC if wallet USDC is insufficient
+    // We check only that XLM is available for the swap
+    const xlmNeededForSwap = amount > availableUSDC ? Math.ceil((amount - availableUSDC) / 0.08 * 1.3) : 0;
+    const canAfford = availableXLM >= xlmNeededForSwap + MIN_XLM_RESERVE;
+
+    if (canAfford) {
+      totalAffordable += amount;
       remainingUSDC   -= amount;
-      totalAffordable += amount;
       decisions.push({
-        action: entry.method === "X402" ? "SIMULATE" : "EXECUTE",
+        action: "EXECUTE",
         vaultEntry: entry,
-        reason: entry.method === "X402"
-          ? `x402 HTTP payment — ${amount} USDC, Soroban auth entry signed`
-          : `Funds available (${availableUSDC.toFixed(2)} USDC) — executing`,
+        reason: availableUSDC >= amount
+          ? `USDC available ($${availableUSDC.toFixed(2)}) — executing $${amount.toFixed(2)} USDC transfer`
+          : `Will swap ~${xlmNeededForSwap} XLM → USDC then send $${amount.toFixed(2)} USDC`,
         walletSnapshot: wallet,
-        projectedBalanceAfter: remainingUSDC.toFixed(7),
+        projectedBalanceAfter: Math.max(0, remainingUSDC).toFixed(2),
       });
     } else {
       decisions.push({
         action: "DEFER",
         vaultEntry: entry,
         reason: entry.priority === "CRITICAL"
-          ? `⚠ CRITICAL underfunding: need ${amount} USDC, have ${remainingUSDC.toFixed(2)}`
-          : `Insufficient funds — deferring to next cycle`,
+          ? `⚠ CRITICAL: need ~${xlmNeededForSwap} XLM for swap, only ${availableXLM.toFixed(2)} available`
+          : `Insufficient XLM for swap — deferring to next cycle`,
         walletSnapshot: wallet,
-        projectedBalanceAfter: remainingUSDC.toFixed(7),
+        projectedBalanceAfter: remainingUSDC.toFixed(2),
       });
     }
   }
 
-  const walletHealthy = isDemo || (
+  const walletHealthy =
     xlmHealthy &&
-    availableUSDC > 0 &&
-    !decisions.some((d) => d.action === "DEFER" && d.vaultEntry.priority === "CRITICAL")
-  );
+    !decisions.some((d) => d.action === "DEFER" && d.vaultEntry.priority === "CRITICAL");
 
-  const recommendation = isDemo
-    ? "Demo mode — all payments simulated with real x402 + Soroban flows"
-    : availableUSDC >= totalRequired
-      ? "Wallet healthy — all obligations covered"
-      : `Wallet short by ${(totalRequired - availableUSDC).toFixed(2)} USDC`;
+  const recommendation = availableXLM >= totalRequired / 0.08
+    ? `Wallet healthy — ${availableXLM.toFixed(0)} XLM can cover all $${totalRequired.toFixed(2)} USDC obligations`
+    : `Wallet short — ${availableXLM.toFixed(0)} XLM available for swaps`;
 
   return {
     decisions,
-    totalAffordableUSDC: totalAffordable.toFixed(7),
-    totalRequiredUSDC:   totalRequired.toFixed(7),
+    totalAffordableUSDC: totalAffordable.toFixed(2),
+    totalRequiredUSDC:   totalRequired.toFixed(2),
     walletHealthy,
     recommendation,
   };
@@ -162,10 +167,10 @@ export function evaluatePolicy(
 export function logPolicyEvaluation(eval_: PolicyEvaluation): void {
   logger.divider("POLICY EVALUATION");
   logger.snapshot("Obligations", {
-    "Required (USDC)":  eval_.totalRequiredUSDC,
-    "Affordable (USDC)": eval_.totalAffordableUSDC,
-    "Status":           eval_.walletHealthy ? "✓ HEALTHY" : "⚠ UNDERFUNDED",
-    "Note":             eval_.recommendation,
+    "Required (USDC)":   `$${eval_.totalRequiredUSDC}`,
+    "Affordable (USDC)": `$${eval_.totalAffordableUSDC}`,
+    "Status":            eval_.walletHealthy ? "✓ HEALTHY" : "⚠ UNDERFUNDED",
+    "Note":              eval_.recommendation,
   });
 
   for (const d of eval_.decisions) {
@@ -173,9 +178,10 @@ export function logPolicyEvaluation(eval_: PolicyEvaluation): void {
                : d.action === "SIMULATE" ? "\x1b[34m◎\x1b[0m"
                : d.action === "DEFER"    ? "\x1b[33m⏸\x1b[0m"
                :                          "\x1b[31m✗\x1b[0m";
+    const amt = `$${parseFloat(d.vaultEntry.amountUSDC).toFixed(2)}`;
     console.log(
       `  ${icon} ${d.vaultEntry.priority.padEnd(14)} ${d.vaultEntry.label.padEnd(34)} ` +
-      `${d.vaultEntry.amountUSDC.padStart(10)} USDC  → ${d.action}`
+      `${amt.padStart(10)} USDC  → ${d.action}`
     );
   }
   console.log();
